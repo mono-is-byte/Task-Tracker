@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── Theme tokens (Phase 5) ─────────────────────────────────────────────
+   CSS variables flip on <html class="dark">; `@theme inline` maps them to
+   utilities (bg-surface, border-line, text-muted, bg-accent …) so themed
+   components read from one place instead of repeating dark: variants. */
+:root {
+  --accent: #4f46e5;
+  --canvas: #f1f5f9;
+  --surface: #ffffff;
+  --line: #e2e8f0;
+  --muted: #64748b;
+}
+
+.dark {
+  --accent: #818cf8;
+  --canvas: #020617;
+  --surface: #0f172a;
+  --line: #1e293b;
+  --muted: #94a3b8;
+}
+
+@theme inline {
+  --color-accent: var(--accent);
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-line: var(--line);
+  --color-muted: var(--muted);
+}
+
+/* ── Base polish ─────────────────────────────────────────────────────── */
+html {
+  font-family: "Inter", "Noto Sans Bengali", ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  background: var(--canvas);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Themed thin scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+}
+
+/* Shared control styles (used by theme toggle + PDF buttons) */
+.tt-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 0.25rem;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  transition: background-color 0.15s, color 0.15s;
+}
+.tt-btn:hover {
+  background: var(--line);
+}
+
+/* Phase 6 layout pass: one token-based surface + heading style so pages stop
+   repeating hardcoded white/slate colors (which also fixes dark theme gaps). */
+.tt-card {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 0.5rem;
+}
+.tt-title {
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.task-row-done {
+  opacity: 0.62;
+}
+.task-row-done td:first-child {
+  text-decoration: line-through;
+}
+
+/* Item 8 — scrollable history/activity lists (ScrollableList component):
+   subtle bottom fade when there is more to scroll + a thin themed bar. */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.scroll-fade-bottom {
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 18px), transparent 100%);
+  mask-image: linear-gradient(to bottom, black calc(100% - 18px), transparent 100%);
+}
+/* When the list is scrolled to the very bottom, drop the fade so the last
+   item isn't dimmed (class toggled by ScrollableList when at bottom). */
+.scroll-fade-bottom.is-bottom {
+  -webkit-mask-image: none;
+  mask-image: none;
+}

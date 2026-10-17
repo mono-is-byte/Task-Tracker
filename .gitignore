@@ -1,0 +1,10 @@
+node_modules/
+.next/
+out/
+*.db
+*.db-journal
+prisma/migrations/migration_lock.toml
+.env
+!.env.example
+coverage/
+public/uploads/
