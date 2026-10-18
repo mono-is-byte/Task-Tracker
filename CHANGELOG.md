@@ -51,9 +51,9 @@ Release sections will be added here as versions are tagged.
   email and password changes.
 - **Administration**: users directory with avatars and soft deletes, designations that
   reference roles, and an audit log for logins, lockouts, permission changes and resets.
-- **Import / export**: CSV and XLSX export plus Excel import using the exact spreadsheet
-  column names, per-row reporting of unknown values, automatic user-story creation and
-  `PREFIX-N` dependency keys.
+- **Import / export**: Excel (.xlsx) export of the filtered table view plus CSV/Excel
+  import using the exact spreadsheet column names, per-row reporting of unknown values,
+  automatic user-story creation and `PREFIX-N` dependency keys.
 - **Theming and shell**: light/dark theme persisted per device and profile without a
   first-paint flash, a collapsible sidebar (desktop icon rail, mobile overlay drawer) and
   a shared icon set.

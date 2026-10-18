@@ -170,7 +170,7 @@ would be regenerated for the new database.
 - No public sign-up — accounts are created by administrators by design.
 
 ### 📥 Import / export & localization
-- **CSV / XLSX export** and **Excel import** using the exact spreadsheet column names.
+- **Excel (.xlsx) export** and **CSV / Excel import** using the exact spreadsheet column names.
 - UTF-8 end-to-end with **NFC-normalized, Bangla-safe search** and the Noto Sans Bengali
   font loaded as a fallback for user-entered text.
 - **Light / dark theme** persisted per device and per profile.
@@ -413,8 +413,8 @@ editable in the permission matrix.
 
 From the Table view:
 
-- **⬇ CSV / ⬇ XLSX** export use the exact spreadsheet column names
-  (`SL, Epic, User Story, Task title, Story Points, Est. Hours, Est. Days, …`).
+- **⬇ Download Excel (.xlsx)** exports the current (filtered) table view with the
+  exact spreadsheet column names (`SL, Epic, User Story, Task title, Story Points, Est. Hours, Est. Days, …`).
 - **⬆ Import** accepts your current sheet: `SL` and `Est. Days` are ignored (the serial is
   automatic and the day count is calculated), unknown Epic / Status / Priority / member
   names are reported per row instead of being guessed, missing user stories are created,
