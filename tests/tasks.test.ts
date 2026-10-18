@@ -2,7 +2,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { makeTestClient } from "../src/lib/db";
 import { hashPassword } from "../src/lib/password";
 import { DEFAULT_ROLES, getMembership, userHasGlobalAction, type Membership } from "../src/lib/permissions";
-import { ctxFromLoad, createTask, listTasks, updateTask, type TaskContext } from "../src/lib/tasks";
+import { ctxFromLoad, createTask, defaultCreationStatusId, listTasks, updateTask, type TaskContext } from "../src/lib/tasks";
+import { listAssignableUsers } from "../src/lib/userDirectory";
 import { replaceStatusDesignations, suggestedForStatus } from "../src/lib/workflow";
 import { resolveDesignationRole } from "../src/lib/users";
 import { estDays } from "../src/lib/domain";
@@ -113,6 +114,26 @@ describe("task creation guards", () => {
     const hoursOnly = await createTask(db, ctx, { title: "hours only", estHours: 6.5 });
     expect(hoursOnly.storyPoints).toBeNull();
     expect(estDays(hoursOnly.estHours, 8)).toBe(0.81);
+  });
+});
+
+// Change request: new tasks can only be created in the To Do section — the
+// API resolves the initial status through defaultCreationStatusId.
+describe("creation starts in To Do", () => {
+  it("resolves the To Do category status even when it is not the first column", async () => {
+    const p = await db.project.create({ data: { key: uniq("T"), name: uniq("todo-rule"), hoursPerDay: 8 } });
+    const wip = await db.status.create({ data: { projectId: p.id, name: "In Progress", category: "inprogress", color: "#00f", position: 0 } });
+    const todo = await db.status.create({ data: { projectId: p.id, name: "To Do", category: "todo", color: "#888", position: 1 } });
+    expect(await defaultCreationStatusId(db, p.id)).toBe(todo.id);
+    // A project without a "todo" category falls back to the first status.
+    await db.status.delete({ where: { id: todo.id } });
+    expect(await defaultCreationStatusId(db, p.id)).toBe(wip.id);
+  });
+  it("creates with the resolved status (so the API override lands in To Do)", async () => {
+    const { ctx } = await membership("pm");
+    const t = await createTask(db, ctx, { title: uniq("todo-only"), statusId: await defaultCreationStatusId(db, fx.project.id) });
+    const row = await db.task.findUniqueOrThrow({ where: { id: t.id } });
+    expect(row.statusId).toBe(fx.S.todo);
   });
 });
 
@@ -452,5 +473,117 @@ describe("status → designation suggestion helpers (role names)", () => {
     const empty = suggestedForStatus(members, []);
     expect(empty.suggested).toHaveLength(0);
     expect(empty.others).toHaveLength(3);
+  });
+});
+
+/**
+ * Item 1: Assignee / Tested By must offer EVERY valid user (Users section),
+ * not just the members of the project being viewed — and the server must accept
+ * them. Soft-deleted users stay unusable; deactivated users stay assignable so
+ * existing work keeps its owner.
+ */
+describe("assignable user directory (all valid users)", () => {
+  async function makeUser(key: string, extra: { active?: boolean; deletedAt?: Date } = {}) {
+    const u = await db.user.create({
+      data: {
+        email: uniq(key) + "@t.local", username: uniq(key), name: uniq(key),
+        passwordHash: await hashPassword("Demo1234!"), mustChangePassword: false,
+        ...extra,
+      },
+    });
+    return u.id;
+  }
+
+  it("listAssignableUsers returns every non-deleted user exactly once and flags members", async () => {
+    const outsider = await makeUser("outsider");
+    const rows = await listAssignableUsers(db, fx.project.id);
+
+    const valid = await db.user.count({ where: { deletedAt: null } });
+    expect(rows).toHaveLength(valid);
+    expect(new Set(rows.map((r) => r.userId)).size).toBe(rows.length);
+
+    const mine = rows.find((r) => r.userId === outsider);
+    expect(mine).toBeDefined();
+    expect(mine!.isMember).toBe(false);
+    expect(mine!.roleNames).toEqual([]);
+
+    const member = rows.find((r) => r.userId === fx.users.dev);
+    expect(member!.isMember).toBe(true);
+    expect(member!.roleNames.length).toBeGreaterThan(0);
+  });
+
+  it("assigns (and re-assigns) a registered user who is not a project member", async () => {
+    const { ctx } = await membership("pm");
+    const outsider = await makeUser("outsider-a");
+    const t = await createTask(db, ctx, {
+      title: "outsider work", statusId: fx.S.todo, priorityId: fx.P.med,
+      assigneeId: outsider, testedById: outsider,
+    });
+    expect(t.assigneeId).toBe(outsider);
+    expect(t.testedById).toBe(outsider);
+    // assignment did NOT create a project membership
+    expect(await db.projectMember.count({ where: { projectId: fx.project.id, userId: outsider } })).toBe(0);
+
+    const other = await makeUser("outsider-b");
+    await updateTask(db, ctx, t.id, { assigneeId: other });
+    const row = await db.task.findUniqueOrThrow({ where: { id: t.id } });
+    expect(row.assigneeId).toBe(other);
+
+    await db.task.delete({ where: { id: t.id } });
+  });
+
+  it("still rejects a soft-deleted user as assignee or tester", async () => {
+    const { ctx } = await membership("pm");
+    const gone = await makeUser("gone", { deletedAt: new Date() });
+    await expect(createTask(db, ctx, {
+      title: "deleted owner", statusId: fx.S.todo, priorityId: fx.P.med, assigneeId: gone,
+    })).rejects.toThrow(/registered user/);
+  });
+
+  it("keeps a deactivated (inactive) user assignable and their tasks editable", async () => {
+    const { ctx } = await membership("pm");
+    const id = await makeUser("deactivated");
+    const t = await createTask(db, ctx, {
+      title: "before deactivation", statusId: fx.S.todo, priorityId: fx.P.med, assigneeId: id,
+    });
+    await db.user.update({ where: { id }, data: { active: false } });
+
+    // Editing an existing task assigned to a now-inactive user must not fail.
+    await updateTask(db, ctx, t.id, { title: "renamed while owner inactive" });
+    const row = await db.task.findUniqueOrThrow({ where: { id: t.id } });
+    expect(row.title).toBe("renamed while owner inactive");
+    expect(row.assigneeId).toBe(id);
+
+    await db.task.delete({ where: { id: t.id } });
+  });
+});
+
+describe("create/update return the full row every view renders (regression)", () => {
+  // The board and table insert the API's task row straight into the shared
+  // store, so a bare transaction row (no status/priority/key) crashed the
+  // table's row renderer after a quick-add, and left stale status chips after
+  // an edit. createTask/updateTask must return the same shape as listTasks.
+  it("createTask includes status, priority, key and the serialized fields", async () => {
+    const { ctx } = await membership("pm");
+    const t = await createTask(db, ctx, { title: uniq("full row"), statusId: fx.S.todo });
+    expect(t.status?.id).toBe(fx.S.todo);
+    expect(t.status?.category).toBe("todo");
+    expect(t.priority?.id).toBe(fx.P.med);
+    expect(t.key).toBe(`${fx.project.key}-${t.serial}`);
+    expect(t.labels).toEqual([]);
+    expect(t.customValues).toEqual({});
+    expect(typeof t.timerState).toBe("string");
+    await db.task.delete({ where: { id: t.id } });
+  });
+
+  it("updateTask returns the refreshed status (and serialized shape) after a change", async () => {
+    const { ctx } = await membership("pm");
+    const t = await createTask(db, ctx, { title: uniq("status refresh"), statusId: fx.S.todo });
+    const updated = await updateTask(db, ctx, t.id, { statusId: fx.S.prog });
+    expect(updated.statusId).toBe(fx.S.prog);
+    expect(updated.status?.id).toBe(fx.S.prog);
+    expect(updated.status?.category).toBe("inprogress");
+    expect(updated.key).toBe(`${fx.project.key}-${t.serial}`);
+    await db.task.delete({ where: { id: t.id } });
   });
 });

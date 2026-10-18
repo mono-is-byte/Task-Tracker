@@ -4,6 +4,7 @@ import type { User } from "@prisma/client";
 import { COOKIE_NAME, getSessionUser } from "./auth";
 import { db, taskKey } from "./db";
 import { getMembership, type Membership } from "./permissions";
+import { listAssignableUsers, type DirectoryUser } from "./userDirectory";
 
 export { taskKey };
 
@@ -31,7 +32,11 @@ export interface ProjectContext {
   statuses: { id: string; name: string; category: string; color: string; position: number; designationTags: string[] }[];
   priorities: { id: string; name: string; level: number; color: string }[];
   issueTypes: { id: string; name: string; color: string }[];
-  members: { userId: string; name: string; username: string; designationName: string | null; avatarUrl: string | null; roleIds: string[]; roleNames: string[]; roleName: string; hoursPerDay: number | null }[];
+  /** Every valid (non-deleted) user, one entry per user id. `isMember` marks the
+   *  project members; `roleIds`/`roleNames` are the project roles (empty for
+   *  non-members). Assignee/Tested By pickers use this whole list — the Users
+   *  section is the source of truth, not the project membership. */
+  members: DirectoryUser[];
   epics: { id: string; name: string; color: string; status: string }[];
   customFields: { id: string; name: string; fieldType: string; options: string[]; required: boolean; showIn: string[]; roleVisibility: Record<string, string> }[];
 }
@@ -50,18 +55,16 @@ export async function loadProject(projectId: string, userId: string, isSuperAdmi
   if (!project) return null;
   const membership = await getMembership(db, userId, isSuperAdmin, projectId);
   if (!membership) return null;
-  const [statuses, priorities, issueTypes, members, epics, customFields, designationTags, roles] = await Promise.all([
+  const [statuses, priorities, issueTypes, members, epics, customFields, designationTags] = await Promise.all([
     db.status.findMany({ where: { projectId }, orderBy: { position: "asc" } }),
     db.priority.findMany({ where: { projectId }, orderBy: { level: "desc" } }),
     db.issueType.findMany({ where: { projectId }, select: { id: true, name: true, color: true } }),
-    db.projectMember.findMany({ where: { projectId }, include: { user: true, roles: { include: { role: true }, orderBy: { role: { name: "asc" } } } }, orderBy: { createdAt: "asc" } }),
+    // Assignee / Tested By options: every valid user, not just project members.
+    listAssignableUsers(db, projectId),
     db.epic.findMany({ where: { projectId }, orderBy: { position: "asc" } }),
     db.customField.findMany({ where: { projectId }, orderBy: { position: "asc" } }),
     db.statusDesignationTag.findMany({ where: { status: { projectId } }, select: { statusId: true, text: true } }),
-    db.role.findMany({ select: { id: true, name: true } }),
   ]);
-  // Designation = role id → live role name (renames are picked up automatically).
-  const roleName = new Map(roles.map((r) => [r.id, r.name]));
   const tagsByStatus: Record<string, string[]> = {};
   for (const m of designationTags) (tagsByStatus[m.statusId] ??= []).push(m.text);
   let settings: Record<string, unknown> = {};
@@ -77,16 +80,7 @@ export async function loadProject(projectId: string, userId: string, isSuperAdmi
     membership,
     statuses: statuses.map((s) => ({ ...s, designationTags: tagsByStatus[s.id] ?? [] })),
     priorities, issueTypes,
-    members: members.map((m) => {
-      const roleNames = m.roles.map((l) => l.role.name);
-      return {
-        userId: m.userId, name: m.user.name, username: m.user.username,
-        designationName: m.user.designation ? roleName.get(m.user.designation) ?? null : null,
-        avatarUrl: m.user.avatarUrl,
-        roleIds: m.roles.map((l) => l.roleId), roleNames, roleName: roleNames.join(", "),
-        hoursPerDay: m.user.hoursPerDay,
-      };
-    }),
+    members,
     epics: epics.map((e) => ({ id: e.id, name: e.name, color: e.color, status: e.status })),
     customFields: customFields.map((f) => ({
       id: f.id, name: f.name, fieldType: f.fieldType,
@@ -115,4 +109,48 @@ export async function listProjectsForUser(
     where: { userId }, include: { project: true },
   });
   return memberships.map((m) => m.project).filter((p) => includeHidden || !p.isHidden);
+}
+
+/** Result of {@link updateProjectIdentity}: the saved values or a friendly error. */
+export type ProjectIdentityUpdate =
+  | { ok: true; key: string; name: string }
+  | { ok: false; message: string };
+
+/**
+ * Change request (sidebar → Edit project): the project KEY and NAME are edited
+ * together, like the "New project" form. The key is normalised to the create
+ * rules (trim + uppercase) and must stay unique across projects. Task keys
+ * ("LVM-12") are computed from the project key, so re-labelling updates every
+ * task immediately — no stored task data is rewritten.
+ */
+export async function updateProjectIdentity(
+  projectId: string,
+  input: { key?: string; name?: string },
+  client = db,
+): Promise<ProjectIdentityUpdate> {
+  const data: { key?: string; name?: string } = {};
+  if (input.name !== undefined) data.name = input.name.trim();
+  if (input.key !== undefined) {
+    const key = input.key.trim().toUpperCase();
+    const clash = await client.project.findUnique({ where: { key } });
+    if (clash && clash.id !== projectId) {
+      return { ok: false, message: `The key “${key}” is already used by another project.` };
+    }
+    data.key = key;
+  }
+  try {
+    const updated = await client.project.update({
+      where: { id: projectId },
+      data,
+      select: { key: true, name: true },
+    });
+    return { ok: true, ...updated };
+  } catch (e) {
+    // Two clients saving the same key at once: the unique index wins, we keep
+    // the friendly message (the update is atomic, so nothing was applied).
+    if (typeof e === "object" && e !== null && (e as { code?: string }).code === "P2002") {
+      return { ok: false, message: "That key is already used by another project." };
+    }
+    throw e;
+  }
 }

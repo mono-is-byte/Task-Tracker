@@ -3,21 +3,22 @@ import { fail, ok, readJson, requireAdmin, clientIp } from "@/lib/api";
 import { audit } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { ACTIONS, TASK_FIELDS } from "@/lib/permissions";
-import { sanitizeFields, sanitizePerms } from "@/lib/roles";
+import { designationCounts, sanitizeFields, sanitizePerms } from "@/lib/roles";
 
 export async function GET(req: Request) {
   const auth = await requireAdmin(req);
   if ("response" in auth) return auth.response;
   const roles = await db.role.findMany({ orderBy: { name: "asc" } });
-  const memberCounts = await db.projectMemberRole.groupBy({ by: ["roleId"], _count: { roleId: true } });
-  const counts = Object.fromEntries(memberCounts.map((m) => [m.roleId, m._count.roleId]));
+  // `users` = how many distinct, non-deleted users hold this role as their
+  // designation (NOT project-membership role links — see designationCounts).
+  const counts = await designationCounts(db);
   return ok({
     actions: ACTIONS,
     fields: [...TASK_FIELDS, "custom:*"],
     roles: roles.map((r) => ({
       id: r.id, name: r.name, description: r.description,
       permissions: JSON.parse(r.permissions), fieldRules: JSON.parse(r.fieldRules),
-      isSystem: r.isSystem, members: counts[r.id] ?? 0,
+      isSystem: r.isSystem, users: counts[r.id] ?? 0,
     })),
   });
 }

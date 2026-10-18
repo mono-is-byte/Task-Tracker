@@ -42,11 +42,11 @@ const PRIORITIES = [
 ];
 
 const ISSUE_TYPES = [
-  { name: "Task", color: "#3b82f6", icon: "task" },
-  { name: "Story", color: "#22c55e", icon: "story" },
-  { name: "Bug", color: "#ef4444", icon: "bug" },
-  { name: "Epic", color: "#a855f7", icon: "epic" },
-  { name: "Sub-task", color: "#64748b", icon: "subtask" },
+  { name: "Task", color: "#3b82f6" },
+  { name: "Story", color: "#22c55e" },
+  { name: "Bug", color: "#ef4444" },
+  { name: "Epic", color: "#a855f7" },
+  { name: "Sub-task", color: "#64748b" },
 ];
 
 async function wipe() {
@@ -112,10 +112,11 @@ async function main() {
     sumit: "QA / Tester", apon: "QA / Tester", viewer: "Viewer / Stakeholder",
   };
 
-  // Designations are free-text job titles only (Step 1) — they grant NO permissions.
-  await db.user.update({ where: { id: userIds.pm }, data: { designation: "Project Manager" } });
-  await db.user.update({ where: { id: userIds.shovon }, data: { designation: "Frontend Developer" } });
-  await db.user.update({ where: { id: userIds.sumit }, data: { designation: "QA Engineer" } });
+  // Designation = a REFERENCE to a role (labels only — grants no
+  // permissions); the seeded roles above supply the ids.
+  await db.user.update({ where: { id: userIds.pm }, data: { designation: roleIds["Project Manager"] } });
+  await db.user.update({ where: { id: userIds.shovon }, data: { designation: roleIds["Developer"] } });
+  await db.user.update({ where: { id: userIds.sumit }, data: { designation: roleIds["QA / Tester"] } });
 
   for (const p of projects) {
     const project = await db.project.create({ data: { key: p.key, name: p.name, bannerNote: p.bannerNote } });
@@ -172,9 +173,10 @@ async function main() {
         },
       });
     }
-    // sample custom fields
+    // sample custom fields — change request: "Nice-to-have" is no longer an
+    // offered Customer Impact option (existing tasks keep their saved value).
     await db.customField.create({
-      data: { projectId: project.id, name: "Customer Impact", fieldType: "select", options: JSON.stringify(["Blocking", "High", "Normal", "Nice-to-have"]), showIn: JSON.stringify(["table", "card", "form"]), position: 0 },
+      data: { projectId: project.id, name: "Customer Impact", fieldType: "select", options: JSON.stringify(["Blocking", "High", "Normal"]), showIn: JSON.stringify(["table", "card", "form"]), position: 0 },
     });
     await db.customField.create({
       data: { projectId: project.id, name: "Docs URL", fieldType: "url", showIn: JSON.stringify(["card", "form"]), position: 1 },

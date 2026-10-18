@@ -3,9 +3,12 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { api } from "@/lib/client";
+import { expandSidebar, getCollapsed, isSidebarMobile } from "@/lib/sidebar";
 import ConfirmDialog from "./ConfirmDialog";
-import RenameDialog from "./RenameDialog";
+import EditProjectDialog from "./EditProjectDialog";
+import { IconCheck, IconChevronRight, IconDots, IconPencil, IconPlus, IconTrash } from "./icons";
 
 export interface SidebarProject {
   id: string;
@@ -19,11 +22,14 @@ export interface SidebarProject {
 /**
  * Sidebar Projects section (change request Phase 2):
  * - the ONLY place to create a project (Admin/PM "+")
- * - per-project Rename / Delete menu for Admin/PM
- * - "Completed Projects" section: filled automatically when all of a project's
+ * - per-project Edit (name + key) / Delete menu for Admin/PM
+ * - "Project Done" section: filled automatically when all of a project's
  *   tasks reach a final status (server-computed, 0 tasks never counts).
  * Step 3: both sections collapse/expand with a chevron + count badge and a
  * smooth animation; the open/closed state persists per section in localStorage.
+ * Sidebar toggle change request: in the collapsed icon rail the project rows
+ * shrink to their key badges (the `.sb-*` hooks below), the section headers
+ * hide, and "New project" expands the rail first so the form has room.
  */
 const LS_PROJECTS_OPEN = "tt.sidebar.projectsOpen";
 const LS_COMPLETED_OPEN = "tt.sidebar.completedOpen";
@@ -39,7 +45,13 @@ export default function SidebarProjects({ projects, canCreate }: { projects: Sid
   const [msg, setMsg] = useState("");
 
   const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState<SidebarProject | null>(null);
+  /** Open the dropdown upward when the row sits low in the sidebar — below the
+   *  fold it used to be clipped by the sidebar's scroll container (change
+   *  request: "unable to edit project name, it's hidden for lower projects"). */
+  const [menuUp, setMenuUp] = useState(false);
+  const [menuRect, setMenuRect] = useState<DOMRect | null>(null);
+  const [menuHeight, setMenuHeight] = useState(0);
+  const [editing, setEditing] = useState<SidebarProject | null>(null);
   const [deleting, setDeleting] = useState<SidebarProject | null>(null);
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [completedOpen, setCompletedOpen] = useState(false);
@@ -74,7 +86,7 @@ export default function SidebarProjects({ projects, canCreate }: { projects: Sid
   /** Smooth collapse wrapper (0fr ⇄ 1fr grid rows). */
   function collapse(open: boolean, children: ReactNode) {
     return (
-      <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+      <div className={`sb-collapse grid transition-[grid-template-rows] duration-200 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
         <div className="min-h-0 overflow-hidden">{children}</div>
       </div>
     );
@@ -82,8 +94,14 @@ export default function SidebarProjects({ projects, canCreate }: { projects: Sid
 
   useEffect(() => {
     if (!menuFor) return;
+    // Backstop for controls stacked ABOVE the click-away layer (the fixed
+    // sidebar toggle sits at z-60): close when one of them is pressed. Clicks
+    // on the layer itself are handled by its own onClick.
     const onDoc = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuFor(null);
+      const t = e.target as HTMLElement | null;
+      if (!t) return;
+      if (t.closest("[data-menu-shield]")) return;
+      if (menuRef.current && !menuRef.current.contains(t)) setMenuFor(null);
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -144,15 +162,16 @@ export default function SidebarProjects({ projects, canCreate }: { projects: Sid
     }
   }
 
-  async function rename(p: SidebarProject, name: string) {
+  /** Change request: save the project name AND key together (like New project). */
+  async function saveProject(p: SidebarProject, key: string, name: string) {
     setBusy(true);
     setMsg("");
     try {
-      await api(`/api/projects/${p.id}/settings`, { method: "PATCH", body: JSON.stringify({ name }) });
-      setRenaming(null);
+      await api(`/api/projects/${p.id}/settings`, { method: "PATCH", body: JSON.stringify({ key, name }) });
+      setEditing(null);
       router.refresh();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Rename failed.");
+      setMsg(e instanceof Error ? e.message : "Could not save the project.");
     } finally {
       setBusy(false);
     }
@@ -176,45 +195,83 @@ export default function SidebarProjects({ projects, canCreate }: { projects: Sid
   function item(p: SidebarProject) {
     const active = pathname?.startsWith(`/p/${p.id}`) ?? false;
     return (
-      <div key={p.id} className="group relative">
+      <div key={p.id} className="sb-proj group relative">
         <Link
           href={`/p/${p.id}/board`}
           aria-current={active ? "page" : undefined}
-          className={`block truncate rounded px-2 py-1 pr-6 transition-colors ${
+          className={`sb-proj-link block truncate rounded px-2 py-1 pr-6 transition-colors ${
             active ? "bg-accent/10 font-semibold text-accent" : "hover:bg-line"
           }`}
           title={`${p.key} ${p.name}`}
         >
-          <span className={`font-mono text-xs ${active ? "" : "text-muted"}`}>{p.key}</span> {p.name}
-          {p.isCompleted && <span className="ml-1 text-green-600 dark:text-green-400" title="All tasks are done">✓</span>}
+          <span className={`font-mono text-xs ${active ? "" : "text-muted"}`}>{p.key}</span> <span className="sb-proj-name">{p.name}</span>
+          {p.isCompleted && <span className="sb-proj-check ml-1 inline-flex align-middle text-green-600 dark:text-green-400" title="All tasks are done"><IconCheck className="h-3 w-3" /></span>}
         </Link>
         {p.canManage && (
           <button
             type="button"
             aria-label={`Actions for ${p.name}`}
-            onClick={() => setMenuFor(menuFor === p.id ? null : p.id)}
-            className="absolute right-0 top-1/2 -translate-y-1/2 rounded px-1 text-muted opacity-0 hover:bg-line focus:opacity-100 group-hover:opacity-100"
+            onClick={(e) => {
+              if (menuFor === p.id) { setMenuFor(null); return; }
+              // Flip the dropdown up for rows near the bottom of the sidebar so
+              // the menu is never clipped by the scroll container.
+              const rect = e.currentTarget.getBoundingClientRect();
+              setMenuUp(window.innerHeight - rect.bottom < 140);
+              setMenuRect(rect);
+              setMenuFor(p.id);
+            }}
+            className="sb-proj-dots absolute right-0 top-1/2 -translate-y-1/2 rounded px-1 py-0.5 text-muted opacity-60 transition-opacity hover:bg-line hover:opacity-100 focus:opacity-100 group-hover:opacity-100"
           >
-            ⋯
+            <IconDots className="h-3.5 w-3.5" />
           </button>
         )}
-        {menuFor === p.id && (
-          <div ref={menuRef} className="absolute right-0 top-full z-40 w-32 rounded border border-line bg-surface py-1 text-xs shadow-lg">
-            <button
-              type="button"
-              onClick={() => { setMenuFor(null); setRenaming(p); setMsg(""); }}
-              className="block w-full px-2 py-1 text-left hover:bg-line"
+        {menuFor === p.id && createPortal(
+          <>
+            {/* Click-away layer: while the menu is open ANY click outside it
+                lands on this layer first and closes the menu — completely
+                independent of event propagation on whatever sits underneath
+                (board drag sensors, rows, the drawer). It closes on `click`
+                (not mousedown) so the very same click is consumed here and
+                cannot fall through to activate the element beneath. Elements
+                above it (e.g. the z-60 sidebar toggle) are covered by the
+                document mousedown backstop below. */}
+            <div
+              aria-hidden="true"
+              data-menu-shield="1"
+              className="fixed inset-0 z-[45]"
+              onClick={() => setMenuFor(null)}
+            />
+            <div
+              ref={(el) => {
+                // Attach the outside-click ref AND measure the height so the menu
+                // can open upward near the bottom of the sidebar.
+                menuRef.current = el;
+                if (el) setMenuHeight(el.offsetHeight);
+              }}
+              className="fixed z-50 w-36 rounded border border-line bg-surface py-1 text-xs shadow-lg"
+              style={{
+                right: `${window.innerWidth - (menuRect?.right ?? 0)}px`,
+                top: menuUp ? `${(menuRect?.top ?? 0) - menuHeight - 4}px` : `${(menuRect?.bottom ?? 0) + 4}px`,
+              }}
             >
-              ✎ Rename
-            </button>
-            <button
-              type="button"
-              onClick={() => { setMenuFor(null); setDeleting(p); setMsg(""); }}
-              className="block w-full px-2 py-1 text-left text-red-600 hover:bg-line dark:text-red-400"
-            >
-              🗑 Delete
-            </button>
-          </div>
+              <button
+                type="button"
+                title="Edit the project name and key"
+                onClick={() => { setMenuFor(null); setEditing(p); setMsg(""); }}
+                className="flex w-full items-center gap-1.5 px-2 py-1 text-left hover:bg-line"
+              >
+                <IconPencil className="h-3.5 w-3.5" /> Edit project
+              </button>
+              <button
+                type="button"
+                onClick={() => { setMenuFor(null); setDeleting(p); setMsg(""); }}
+                className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-red-600 hover:bg-line dark:text-red-400"
+              >
+                <IconTrash className="h-3.5 w-3.5" /> Delete
+              </button>
+            </div>
+          </>,
+          document.body
         )}
       </div>
     );
@@ -222,33 +279,39 @@ export default function SidebarProjects({ projects, canCreate }: { projects: Sid
 
   return (
     <div>
-      <div className="mt-2 flex items-center gap-1 px-2">
+      <div className="sb-section-head mt-2 flex items-center gap-1 px-2">
         <button
           type="button"
           onClick={toggleProjects}
           aria-expanded={projectsOpen}
-          className="flex min-w-0 flex-1 items-center gap-1 rounded py-0.5 text-left text-xs uppercase text-muted hover:bg-line"
+          className="sb-section-toggle flex min-w-0 flex-1 items-center gap-1 rounded py-0.5 text-left text-xs uppercase text-muted hover:bg-line"
           title={projectsOpen ? "Collapse the project list" : "Expand the project list"}
         >
-          <span className="text-[10px]">{projectsOpen ? "▾" : "▸"}</span>
-          <span className="truncate">Projects ({active.length})</span>
+          <IconChevronRight className={`h-3 w-3 shrink-0 transition-transform ${projectsOpen ? "rotate-90" : ""}`} />
+          <span className="sb-label truncate">Projects ({active.length})</span>
         </button>
         {canCreate && (
           <button
             type="button"
-            onClick={() => { setCreating((v) => !v); setMsg(""); }}
-            className="rounded px-1 leading-none text-muted hover:bg-line hover:text-accent"
+            onClick={() => {
+              // The create form needs full width — open the rail first when collapsed.
+              if (!isSidebarMobile() && getCollapsed()) expandSidebar();
+              setCreating((v) => !v);
+              setMsg("");
+            }}
+            className="sb-plus rounded p-0.5 text-muted hover:bg-line hover:text-accent"
             title="New project"
+            aria-label="New project"
           >
-            ＋
+            <IconPlus className="h-3.5 w-3.5" />
           </button>
         )}
       </div>
       {collapse(projectsOpen, (
         <>
-          {msg && <p className="px-2 py-0.5 text-[11px] text-red-600 dark:text-red-400">{msg}</p>}
+          {msg && <p className="sb-msg px-2 py-0.5 text-[11px] text-red-600 dark:text-red-400">{msg}</p>}
           {creating && (
-            <div className="mx-1 mb-1 flex flex-col gap-1 rounded border border-line p-1.5">
+            <div className="sb-create mx-1 mb-1 flex flex-col gap-1 rounded border border-line p-1.5">
               <input
                 value={newKey}
                 onChange={(e) => setNewKey(e.target.value.toUpperCase())}
@@ -284,33 +347,32 @@ export default function SidebarProjects({ projects, canCreate }: { projects: Sid
           )}
           {active.map(item)}
           {active.length === 0 && completed.length === 0 && (
-            <span className="block px-2 text-xs text-muted">No projects yet.</span>
+            <span className="sb-label block px-2 text-xs text-muted">No projects yet.</span>
           )}
         </>
       ))}
       {completed.length > 0 && (
-        <div className="mt-2">
+        <div className="sb-completed mt-2">
           <button
             type="button"
             onClick={toggleCompleted}
             aria-expanded={completedOpen}
-            className="flex w-full items-center gap-1 rounded px-2 py-1 text-left text-xs uppercase text-muted hover:bg-line"
+            className="sb-section-toggle flex w-full items-center gap-1 rounded px-2 py-1 text-left text-xs uppercase text-muted hover:bg-line"
             title="Projects whose tasks are all in a final status"
           >
-            <span className="text-[10px]">{completedOpen ? "▾" : "▸"}</span>
-            Completed Projects ({completed.length})
+            <IconChevronRight className={`h-3 w-3 shrink-0 transition-transform ${completedOpen ? "rotate-90" : ""}`} />
+            <span className="sb-label truncate">Project Done ({completed.length})</span>
           </button>
           {collapse(completedOpen, <div>{completed.map(item)}</div>)}
         </div>
       )}
-      {renaming && (
-        <RenameDialog
-          title={`Rename “${renaming.name}”`}
-          initialValue={renaming.name}
+      {editing && (
+        <EditProjectDialog
+          project={{ key: editing.key, name: editing.name }}
           busy={busy}
           error={msg}
-          onCancel={() => { setRenaming(null); setMsg(""); }}
-          onSave={(v) => rename(renaming, v)}
+          onCancel={() => { setEditing(null); setMsg(""); }}
+          onSave={(key, name) => saveProject(editing, key, name)}
         />
       )}
       {deleting && (

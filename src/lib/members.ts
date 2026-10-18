@@ -7,6 +7,8 @@ export interface ProjectMemberRow {
   email: string;
   username: string;
   active: boolean;
+  /** Uploaded picture, shown in the members list (same avatar as Users). */
+  avatarUrl: string | null;
   /**
    * The user's designation: the NAME of the role their `User.designation`
    * points at, resolved live (renames show up here immediately). Null when the
@@ -26,7 +28,7 @@ export async function listProjectMembers(client: PrismaClient, projectId: string
     client.projectMember.findMany({
       where: { projectId },
       include: {
-        user: { select: { id: true, name: true, email: true, username: true, active: true, designation: true } },
+        user: { select: { id: true, name: true, email: true, username: true, active: true, designation: true, avatarUrl: true } },
         roles: { include: { role: true }, orderBy: { role: { name: "asc" } } },
       },
       orderBy: { user: { name: "asc" } },
@@ -43,6 +45,7 @@ export async function listProjectMembers(client: PrismaClient, projectId: string
       email: m.user.email,
       username: m.user.username,
       active: m.user.active,
+      avatarUrl: m.user.avatarUrl,
       designation: m.user.designation ? roleName.get(m.user.designation) ?? null : null,
       roleIds: m.roles.map((l) => l.roleId),
       roleNames: m.roles.map((l) => l.role.name),

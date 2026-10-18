@@ -40,17 +40,41 @@ export function startOfDay(d: Date): Date {
   return c;
 }
 
-/** Count working days (inclusive) in [start, end] given weekday set (0=Sun..6=Sat) and holiday ISO dates. */
-export function workingDaysBetween(start: Date, end: Date, workingDays: number[], holidays: string[] = []): number {
+/** Local YYYY-MM-DD (holiday day keys are local, matching `dayKey()` in lib/calendar). */
+function localDay(d: Date): string {
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/**
+ * Count working days (inclusive) in [start, end] given the weekday set
+ * (0=Sun..6=Sat), configured holiday day keys and working-day exceptions.
+ * Precedence matches the calendar (lib/holidayDates): a working-day exception
+ * counts as a working day even when it is a weekly holiday or a holiday.
+ */
+export function workingDaysBetween(
+  start: Date,
+  end: Date,
+  workingDays: number[],
+  holidays: string[] = [],
+  exceptions: string[] = [],
+): number {
   const s = startOfDay(new Date(start)).getTime();
   const e = startOfDay(new Date(end)).getTime();
   if (e < s) return 0;
   const hol = new Set(holidays);
+  const extra = new Set(exceptions);
   let count = 0;
   for (let t = s; t <= e; t += DAY_MS) {
     const d = new Date(t);
+    const key = localDay(d);
+    if (extra.has(key)) {
+      count++;
+      continue;
+    }
     if (!workingDays.includes(d.getDay())) continue;
-    if (hol.has(d.toISOString().slice(0, 10))) continue;
+    if (hol.has(key)) continue;
     count++;
   }
   return count;
@@ -63,8 +87,9 @@ export function computeCapacity(
   end: Date,
   workingDays: number[],
   holidays: string[] = [],
+  exceptions: string[] = [],
 ): number {
-  const days = workingDaysBetween(start, end, workingDays, holidays);
+  const days = workingDaysBetween(start, end, workingDays, holidays, exceptions);
   return Math.round(memberHoursPerDay.reduce((a, b) => a + b, 0) * days * 100) / 100;
 }
 

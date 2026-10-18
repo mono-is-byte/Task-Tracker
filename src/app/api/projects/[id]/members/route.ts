@@ -22,7 +22,26 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if ("response" in auth) return auth.response;
   // Members + their live designation (set/updated on the Users page) — the
   // designation is read straight from the user record, never a stored copy.
-  return ok(await listProjectMembers(db, id));
+  // `roles` powers the "Add member" role picker and `users` its user picker:
+  // every valid (non-deleted) user is offered, the page hides current members.
+  const [data, roles, users] = await Promise.all([
+    listProjectMembers(db, id),
+    db.role.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    db.user.findMany({
+      where: { deletedAt: null },
+      select: { id: true, name: true, email: true, username: true, designation: true, avatarUrl: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+  const roleName = new Map(roles.map((r) => [r.id, r.name]));
+  return ok({
+    ...data,
+    roles,
+    users: users.map((u) => ({
+      id: u.id, name: u.name, email: u.email, username: u.username, avatarUrl: u.avatarUrl,
+      designationName: u.designation ? roleName.get(u.designation) ?? null : null,
+    })),
+  });
 }
 
 const AddBody = z.object({

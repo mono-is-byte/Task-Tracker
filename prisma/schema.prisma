@@ -22,7 +22,6 @@ model User {
   isSuperAdmin       Boolean   @default(false)
   lockedUntil        DateTime?
   failedLogins       Int       @default(0)
-  locale             String    @default("en")
   theme              String    @default("system")
   avatarUrl          String?
   /// Change request: designation = a REFERENCE to a role (Roles & Permissions).
@@ -30,7 +29,6 @@ model User {
   /// name live, so renaming a role updates every user's designation at once.
   designation        String?
   hoursPerDay        Float?
-  notifyPrefs        String    @default("{}")
   lastActiveAt       DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
@@ -110,33 +108,6 @@ model Role {
   updatedAt   DateTime @updatedAt
 
   memberLinks ProjectMemberRole[]
-}
-
-/// LEGACY: the old designation catalog. Kept untouched (no destructive
-/// migration) but no longer used by the UI/API — designations are role ids.
-model Designation {
-  id           String   @id @default(cuid())
-  name         String   @unique
-  suggestedRole String?
-  position     Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  statusMappings StatusDesignation[]
-}
-
-/// LEGACY (Step 1): the id-based status → designation mapping. Superseded by
-/// StatusDesignationTag below; kept untouched (no destructive migration).
-model StatusDesignation {
-  id            String      @id @default(cuid())
-  statusId      String
-  status        Status      @relation(fields: [statusId], references: [id], onDelete: Cascade)
-  designationId String
-  designation   Designation @relation(fields: [designationId], references: [id], onDelete: Cascade)
-  createdAt     DateTime    @default(now())
-
-  @@unique([statusId, designationId])
-  @@index([designationId])
 }
 
 /// Step 1: free-text status → designation suggestion. Members whose (free-text)
@@ -231,7 +202,6 @@ model Status {
   tasks       Task[]
   fromLinks   StatusTransition[] @relation("TransFrom")
   toLinks     StatusTransition[] @relation("TransTo")
-  designations StatusDesignation[]
   designationTags StatusDesignationTag[]
   stageTimes  TaskStageTime[]
 
@@ -491,9 +461,26 @@ model SavedView {
   createdAt DateTime @default(now())
 }
 
-/** Holidays are global for everyone — no per-project scope (item 1). */
+/** Holidays are global for everyone - no per-project scope (item 1).
+ *  A holiday covers [date .. endDate] inclusive; `endDate` null or equal to
+ *  `date` means a single day. `type` is a free label (public/festival/office/other).
+ *  Working-day exceptions never touch these rows. */
 model Holiday {
-  id    String   @id @default(cuid())
-  date  DateTime
-  name  String   @default("")
+  id          String    @id @default(cuid())
+  date        DateTime
+  endDate     DateTime?
+  name        String    @default("")
+  description String    @default("")
+  type        String    @default("public")
+}
+
+/** Working-day exception: the office stays open on a weekly holiday (Fri/Sat)
+ *  or on a configured holiday. Precedence: exception > holiday/ weekly holiday.
+ *  Removing the exception restores the underlying holiday status because the
+ *  Holiday row is never changed by this table. */
+model WorkingDayException {
+  id        String   @id @default(cuid())
+  date      DateTime @unique
+  note      String   @default("")
+  createdAt DateTime @default(now())
 }

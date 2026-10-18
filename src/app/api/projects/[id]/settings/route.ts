@@ -2,9 +2,13 @@ import { z } from "zod";
 import { fail, ok, readJson, requireMember, clientIp } from "@/lib/api";
 import { audit } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { publish } from "@/lib/events";
+import { publish, publishGlobal } from "@/lib/events";
+import { updateProjectIdentity } from "@/lib/server";
 
 const SettingsBody = z.object({
+  // Change request (sidebar → Edit project): the KEY is editable next to the
+  // name, with the same rules as "New project" (uppercase letters/digits).
+  key: z.string().min(1).max(10).regex(/^[A-Z0-9]+$/, "Key must be uppercase letters/digits, e.g. MAP").optional(),
   name: z.string().min(1).max(120).optional(),
   description: z.string().max(500).nullable().optional(),
   hoursPerDay: z.number().min(1).max(24).optional(),
@@ -28,8 +32,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const project = await db.project.findUniqueOrThrow({ where: { id } });
   let settings: Record<string, unknown> = {};
   try { settings = JSON.parse(project.settings); } catch { settings = {}; }
+  // The key + name pair is saved through the shared helper so the sidebar, the
+  // "New project" form and this route all enforce the same rules.
+  let identityChanged = false;
+  if (parsed.data.key !== undefined || parsed.data.name !== undefined) {
+    const res = await updateProjectIdentity(id, { key: parsed.data.key, name: parsed.data.name }, db);
+    if (!res.ok) return fail(409, "conflict", res.message);
+    identityChanged = true;
+  }
   const data: Record<string, unknown> = {};
-  if (parsed.data.name !== undefined) data.name = parsed.data.name.trim();
   if (parsed.data.description !== undefined) data.description = parsed.data.description;
   if (parsed.data.hoursPerDay !== undefined) data.hoursPerDay = parsed.data.hoursPerDay;
   if (parsed.data.workingDays !== undefined) data.workingDays = JSON.stringify(parsed.data.workingDays);
@@ -43,53 +54,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   await db.project.update({ where: { id }, data });
   await audit(db, { actorId: auth.user.id, action: "project.settings", entity: "project", entityId: id, meta: parsed.data, ip: clientIp(req) });
   publish(id, "project_changed", {});
+  // The sidebar shows every project's key + name, so tell ALL connected clients
+  // to refresh when the identity changed (project-scoped events alone would
+  // only reach clients that joined this project's stream).
+  if (identityChanged) publishGlobal("projects_changed", { projectId: id });
   return ok({ updated: true });
-}
-
-const PriorityBody = z.object({ name: z.string().min(1).max(40), level: z.number().optional(), color: z.string().max(20).optional() });
-const TypeBody = z.object({ name: z.string().min(1).max(40), color: z.string().max(20).optional() });
-
-// Priorities & issue types management (same manage_workflow permission)
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const auth = await requireMember(req, id, "manage_workflow");
-  if ("response" in auth) return auth.response;
-  const url = new URL(req.url);
-  const kind = url.searchParams.get("kind") ?? "priority";
-  const { value, error } = await readJson(req);
-  if (error) return error;
-  try {
-    if (kind === "type") {
-      const parsed = TypeBody.safeParse(value);
-      if (!parsed.success) return fail(400, "validation", "Type name required.");
-      const t = await db.issueType.create({ data: { projectId: id, name: parsed.data.name.trim(), color: parsed.data.color ?? "#6366f1" } });
-      return ok({ type: t }, 201);
-    }
-    const parsed = PriorityBody.safeParse(value);
-    if (!parsed.success) return fail(400, "validation", "Priority name required.");
-    const p = await db.priority.create({ data: { projectId: id, name: parsed.data.name.trim(), level: parsed.data.level ?? 3, color: parsed.data.color ?? "#94a3b8" } });
-    return ok({ priority: p }, 201);
-  } catch {
-    return fail(409, "conflict", "Name already exists.");
-  }
-}
-
-export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const auth = await requireMember(req, id, "manage_workflow");
-  if ("response" in auth) return auth.response;
-  const url = new URL(req.url);
-  const kind = url.searchParams.get("kind") ?? "priority";
-  const refId = url.searchParams.get("refId");
-  if (!refId) return fail(400, "validation", "refId required.");
-  if (kind === "type") {
-    const used = await db.task.count({ where: { typeId: refId, projectId: id } });
-    if (used > 0) return fail(400, "validation", `Type still has ${used} task(s).`);
-    await db.issueType.deleteMany({ where: { id: refId, projectId: id } });
-  } else {
-    const used = await db.task.count({ where: { priorityId: refId, projectId: id } });
-    if (used > 0) return fail(400, "validation", `Priority still has ${used} task(s).`);
-    await db.priority.deleteMany({ where: { id: refId, projectId: id } });
-  }
-  return ok({ deleted: true });
 }

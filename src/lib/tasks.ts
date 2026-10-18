@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { runAutomation } from "./automation";
 import { recomputeProjectCompletion } from "./completion";
@@ -67,6 +67,33 @@ export function serializeTask<T extends Record<string, unknown>>(prefix: string,
   };
 }
 
+/**
+ * Relations every task row carries. Board cards, table rows, timeline, drawer
+ * and the client task store all render from this shape, so create/update
+ * responses must match `listTasks` exactly: the store replaces its row with the
+ * server response, and a bare transaction row (no `status`/`priority`/`key`)
+ * crashed the table's row renderer and left stale status names after edits.
+ */
+const TASK_ROW_INCLUDE = {
+  status: true, priority: true, type: true,
+  assignee: { select: { id: true, name: true, username: true, avatarUrl: true } },
+  testedBy: { select: { id: true, name: true, username: true, avatarUrl: true } },
+  epic: { select: { id: true, name: true, color: true } },
+  story: { select: { id: true, title: true } },
+  _count: { select: { comments: true, linksFrom: true, linksTo: true } },
+} satisfies Prisma.TaskInclude;
+
+/** The serialized task row every view renders (identical to `listTasks` rows). */
+function serializeFullTask<T extends Record<string, unknown>>(row: T, ctx: TaskContext) {
+  return serializeTask(ctx.projectKey, ctx.hoursPerDay, row);
+}
+
+/** The authoritative, serialized row for one task — same shape as `listTasks`. */
+async function fullTaskRow(client: PrismaClient, ctx: TaskContext, taskId: string) {
+  const row = await client.task.findUniqueOrThrow({ where: { id: taskId }, include: TASK_ROW_INCLUDE });
+  return serializeFullTask(row as unknown as typeof row & Record<string, unknown>, ctx);
+}
+
 /** Admin/PM level for the current membership (used by status bypass and timer scheduling). */
 export function managerLevel(m: Membership): boolean {
   return m.isSuperAdmin || canDo(m.perms, "manage_workflow") || canDo(m.perms, "manage_archive");
@@ -101,14 +128,7 @@ export async function listTasks(client: PrismaClient, ctx: TaskContext, filters:
     client.task.count({ where: where as never }),
     client.task.findMany({
       where: where as never,
-      include: {
-        status: true, priority: true, type: true,
-        assignee: { select: { id: true, name: true, username: true, avatarUrl: true } },
-        testedBy: { select: { id: true, name: true, username: true, avatarUrl: true } },
-        epic: { select: { id: true, name: true, color: true } },
-        story: { select: { id: true, title: true } },
-        _count: { select: { comments: true, linksFrom: true, linksTo: true } },
-      },
+      include: TASK_ROW_INCLUDE,
       orderBy: [{ status: { position: "asc" } }, { position: "asc" }, { serial: "asc" }],
       take: filters.search ? 5000 : take,
       skip: filters.search ? 0 : (filters.skip ?? 0),
@@ -158,8 +178,11 @@ async function assertRefs(client: PrismaClient, projectId: string, patch: TaskPa
   for (const [field, label] of [["assigneeId", "Assignee"], ["testedById", "Tester"]] as const) {
     const id = patch[field];
     if (id) {
-      const m = await client.projectMember.findUnique({ where: { projectId_userId: { projectId, userId: id } }, include: { user: true } });
-      if (!m || !m.user.active) throw new Error(`${label} must be an active project member.`);
+      // Any registered (non-deleted) user is assignable — project membership is
+      // not required: the Users section is the source of truth for pickers, and
+      // deactivated accounts stay usable so existing work keeps its owner.
+      const u = await client.user.findUnique({ where: { id }, select: { id: true, deletedAt: true } });
+      if (!u || u.deletedAt) throw new Error(`${label} must be a registered user.`);
     }
   }
 }
@@ -169,6 +192,23 @@ function checkPoints(points: number | null | undefined, scale: number[]) {
   if (!scale.includes(points)) {
     throw new Error(`Story points must be one of: ${scale.join(", ")} (or empty).`);
   }
+}
+
+/**
+ * Change request: interactive task creation is To Do-only. The POST
+ * /api/projects/[id]/tasks endpoint (Board "+ Add Task", Table quick-add, and
+ * any other client) resolves the initial status here, so a new task always
+ * lands in the project's To Do status — category "todo", first by position —
+ * even when a client sends a different statusId. Falls back to the first
+ * status when a project has no To Do category. Bulk import keeps the file's
+ * statuses and calls createTask directly, so it is unaffected.
+ */
+export async function defaultCreationStatusId(client: PrismaClient, projectId: string): Promise<string> {
+  const status =
+    (await client.status.findFirst({ where: { projectId, category: "todo" }, orderBy: { position: "asc" } })) ??
+    (await client.status.findFirst({ where: { projectId }, orderBy: { position: "asc" } }));
+  if (!status) throw new Error("Project has no statuses.");
+  return status.id;
 }
 
 export async function createTask(client: PrismaClient, ctx: TaskContext, input: TaskPatch) {
@@ -254,7 +294,7 @@ export async function createTask(client: PrismaClient, ctx: TaskContext, input: 
   });
   const full = await client.task.findUniqueOrThrow({
     where: { id: task.id },
-    include: { status: true, priority: true },
+    include: TASK_ROW_INCLUDE,
   });
   await runAutomation(client, {
     projectId, taskId: task.id, trigger: "task_created", actorId: userId,
@@ -272,7 +312,9 @@ export async function createTask(client: PrismaClient, ctx: TaskContext, input: 
   // Step 5: adding a task to a completed project moves it back to active —
   // recomputed inside the transaction above, announced (sidebar) after commit.
   if (completion.flipped) publishGlobal("projects_changed", { projectId, isCompleted: completion.isCompleted });
-  return task;
+  // Board/table insert this row as-is (the store uses the response as the
+  // authoritative row), so return the full serialized shape, not the bare tx row.
+  return serializeFullTask(full as unknown as typeof full & Record<string, unknown>, ctx);
 }
 
 const FIELD_TO_RULE: Record<string, string> = {
@@ -450,7 +492,7 @@ export async function updateTask(client: PrismaClient, ctx: TaskContext, taskId:
     const completion = changes.statusId ? await recomputeProjectCompletion(tx, projectId) : null;
     return { updated: u, completion };
   });
-  if (!result) return task;
+  if (!result) return fullTaskRow(client, ctx, task.id);
   const { updated, completion } = result;
   for (const [field, diff] of Object.entries(changes)) {
     await client.activity.create({
@@ -496,7 +538,10 @@ export async function updateTask(client: PrismaClient, ctx: TaskContext, taskId:
   // Step 5: a status change may complete the project or move it back — the
   // recompute ran in the transaction above; announce the flip after commit.
   if (completion?.flipped) publishGlobal("projects_changed", { projectId, isCompleted: completion.isCompleted });
-  return updated;
+  // The store replaces the optimistic row with this response, so it must carry
+  // the full serialized shape (status/priority/assignee/... refreshed) — not the
+  // bare update result, which would leave a stale status chip on the board.
+  return fullTaskRow(client, ctx, task.id);
 }
 
 export async function deleteTask(client: PrismaClient, ctx: TaskContext, taskId: string) {

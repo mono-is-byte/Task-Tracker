@@ -8,26 +8,45 @@
    components read from one place instead of repeating dark: variants. */
 :root {
   --accent: #4f46e5;
-  --canvas: #f1f5f9;
+  --accent-strong: #4338ca;
+  --canvas: #f5f7fb;
   --surface: #ffffff;
   --line: #e2e8f0;
   --muted: #64748b;
+  /* Calendar day classification (Change request: Calendar + design system).
+     Fri/Sat (weekly holiday) background is exactly #fff2f2 (change request:
+     Members redesign & calendar colour); configured holidays and working-day
+     exceptions keep their own colours below. */
+  --hol-weekly: #fff2f2;
+  --hol-holiday: #fbdada;
+  --hol-exception: #fff2cc;
 }
 
 .dark {
   --accent: #818cf8;
+  --accent-strong: #a5b4fc;
   --canvas: #020617;
   --surface: #0f172a;
   --line: #1e293b;
   --muted: #94a3b8;
+  /* Dark equivalents keep the same hues at a readable contrast — #fff2f2 on a
+     near-black canvas would destroy contrast, so the weekly holiday keeps its
+     existing dark tint. */
+  --hol-weekly: #3b1d1d;
+  --hol-holiday: #4c2020;
+  --hol-exception: #40340f;
 }
 
 @theme inline {
   --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
   --color-line: var(--line);
   --color-muted: var(--muted);
+  --color-hol-weekly: var(--hol-weekly);
+  --color-hol-holiday: var(--hol-holiday);
+  --color-hol-exception: var(--hol-exception);
 }
 
 /* ── Base polish ─────────────────────────────────────────────────────── */
@@ -92,11 +111,106 @@ body {
   letter-spacing: -0.01em;
 }
 
+/* Change request (UI design system): one primary button + one input style so
+   Login, the Dashboard and every form share the same look and states. */
+.tt-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border-radius: 0.375rem;
+  background: var(--accent);
+  color: #ffffff;
+  padding: 0.5rem 0.875rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: background-color 0.15s, opacity 0.15s, box-shadow 0.15s;
+}
+.tt-btn-primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+.tt-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.dark .tt-btn-primary {
+  color: #0b1120;
+}
+
+/* Change request (table/dashboard toolbars): one compact button size — the
+   same buttons, just smaller, so toolbar rows share a single height. */
+.tt-btn-sm {
+  padding: 0.2rem 0.45rem;
+  font-size: 0.6875rem;
+}
+
+.tt-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.625rem;
+  font-size: 0.875rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.tt-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* Dashboard / summary cards. */
+.tt-kpi {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 0.5rem;
+  padding: 0.75rem 0.875rem;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+.tt-kpi:hover {
+  box-shadow: 0 8px 20px -12px rgb(15 23 42 / 0.35);
+}
+
+@keyframes tt-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.tt-spin {
+  animation: tt-spin 0.8s linear infinite;
+}
+
 .task-row-done {
   opacity: 0.62;
 }
 .task-row-done td:first-child {
   text-decoration: line-through;
+}
+
+/* ── Task table (change request: table redesign) ────────────────────────
+   border-collapse stays "separate" so the sticky header keeps its bottom
+   border; numeric columns right-align (inputs included); the hover tint is
+   a filter on the cells so it stays visible over the per-status row colour. */
+.tt-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+}
+.tt-table th[data-num="1"],
+.tt-table td[data-num="1"] {
+  text-align: right;
+}
+.tt-table td[data-num="1"] input {
+  text-align: right;
+}
+.tt-row > td {
+  transition: filter 0.12s ease;
+}
+.tt-row:hover > td {
+  filter: brightness(0.97);
+}
+.dark .tt-row:hover > td {
+  filter: brightness(1.15);
 }
 
 /* Item 8 — scrollable history/activity lists (ScrollableList component):
@@ -114,4 +228,118 @@ body {
 .scroll-fade-bottom.is-bottom {
   -webkit-mask-image: none;
   mask-image: none;
+}
+
+/* ── Collapsible sidebar & mobile drawer (change request: sidebar toggle) ──
+   Expanded/collapsed is one attribute on <html data-sb="…"> (restored before
+   paint by the root layout's inline script), the mobile drawer is
+   <html data-sb-mobile="open">. These rules sit outside the Tailwind layers,
+   so they win over the utility classes without !important. */
+.sb-toggle {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
+  transition: left 0.2s ease, color 0.15s ease, background-color 0.15s ease;
+}
+.sb-toggle:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+.sb-ico-menu { display: inline-flex; }
+.sb-ico-close, .sb-ico-panel { display: none; }
+
+.sb-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgb(2 6 23 / 0.45);
+}
+
+.sb-aside { transition: transform 0.2s ease, width 0.2s ease; }
+
+/* Mobile / tablet: overlay drawer instead of the fixed rail. */
+@media (max-width: 1023.98px) {
+  .sb-aside {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    height: 100dvh;
+    transform: translateX(-100%);
+  }
+  html[data-sb-mobile="open"] .sb-aside {
+    transform: translateX(0);
+    box-shadow: 0 12px 32px -12px rgb(2 6 23 / 0.5);
+  }
+  html[data-sb-mobile="open"] .sb-toggle { left: calc(13rem - 1.25rem); }
+  html[data-sb-mobile="open"] .sb-ico-menu { display: none; }
+  html[data-sb-mobile="open"] .sb-ico-close { display: inline-flex; }
+  html[data-sb-mobile="open"] .sb-backdrop { display: block; }
+  html[data-sb-mobile="open"] { overflow: hidden; }
+}
+
+/* Desktop: collapse to a compact icon rail. */
+@media (min-width: 1024px) {
+  .sb-toggle { left: calc(13rem - 1.25rem); }
+  html[data-sb="collapsed"] .sb-toggle { left: calc(3.5rem - 1.25rem); }
+  html[data-sb="collapsed"] .sb-aside { width: 3.5rem; }
+  html[data-sb="collapsed"] .sb-label,
+  html[data-sb="collapsed"] .sb-section-toggle,
+  html[data-sb="collapsed"] .sb-proj-name,
+  html[data-sb="collapsed"] .sb-proj-check,
+  html[data-sb="collapsed"] .sb-proj-dots,
+  html[data-sb="collapsed"] .sb-create,
+  html[data-sb="collapsed"] .sb-msg { display: none; }
+  /* Keep the brand link as an invisible spacer (text-lg line + mb-4 = 44 px):
+     without it the nav would start at the very top of the rail, where the
+     toggle button straddles the edge and would overlap the first icon. The
+     nowrap brand text is clipped so the rail never gets a horizontal
+     scrollbar (overflow-y: auto computes overflow-x to auto). */
+  html[data-sb="collapsed"] .sb-logo { visibility: hidden; white-space: nowrap; overflow: hidden; }
+  html[data-sb="collapsed"] .sb-aside nav a { justify-content: center; }
+  html[data-sb="collapsed"] .sb-section-head { justify-content: center; }
+  /* Section separators in the rail (change request): the group headings
+     (Projects / Admin) are hidden when collapsed, so their boundaries get
+     thin gray rules — same colour as the divider the completed section
+     already shows above "Project Done". */
+  html[data-sb="collapsed"] .sb-section-head {
+    border-top: 1px solid var(--line);
+    padding-top: 0.5rem;
+  }
+  html[data-sb="collapsed"] .sb-section {
+    display: block;
+    height: 0;
+    overflow: hidden;
+    margin: 0.5rem 0 0;
+    padding: 0;
+    border-top: 1px solid var(--line);
+    font-size: 0;
+  }
+  html[data-sb="collapsed"] .sb-collapse { grid-template-rows: 1fr; }
+  html[data-sb="collapsed"] .sb-proj-link { display: flex; justify-content: center; padding: 0.375rem 0; }
+  html[data-sb="collapsed"] .sb-completed { margin-top: 0.5rem; border-top: 1px solid var(--line); padding-top: 0.5rem; }
+  html[data-sb="collapsed"] .sb-user { flex-direction: column; align-items: center; gap: 0.25rem; padding: 0.375rem 0; }
+  html[data-sb="collapsed"] .sb-actions { flex-direction: column; align-items: center; }
+  html[data-sb="collapsed"] .sb-actions a,
+  html[data-sb="collapsed"] .sb-actions button { justify-content: center; }
+  html[data-sb="collapsed"] .sb-ico-panel { transform: rotate(180deg); }
+  .sb-ico-menu, .sb-ico-close { display: none; }
+  .sb-ico-panel { display: inline-flex; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-toggle, .sb-aside { transition: none; }
 }

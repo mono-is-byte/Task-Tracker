@@ -1,12 +1,12 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { makeTestClient } from "../src/lib/db";
+import { makeTestClient, taskKey } from "../src/lib/db";
 import { hashPassword } from "../src/lib/password";
 import { DEFAULT_ROLES, getMembership } from "../src/lib/permissions";
 import { ctxFromLoad, createTask, deleteTask, listTasks, updateTask, type TaskContext } from "../src/lib/tasks";
 import { removeStatus } from "../src/lib/workflow-server";
 import { subscribeGlobal } from "../src/lib/events";
 import { listProjectMembers } from "../src/lib/members";
-import { listProjectsForUser } from "../src/lib/server";
+import { listProjectsForUser, updateProjectIdentity } from "../src/lib/server";
 
 const TEST_URL = "file:./tests/test-projects.db";
 const db = makeTestClient(TEST_URL);
@@ -299,5 +299,47 @@ describe("Members page shows live designations (role references)", () => {
     await db.user.updateMany({ where: { designation: role.id }, data: { designation: null } });
     await db.role.delete({ where: { id: role.id } });
     expect((await listProjectMembers(db, fx.A.id)).members.find((m) => m.userId === fx.users.dev)!.designation).toBeNull();
+  });
+});
+
+describe("edit project name & key (sidebar → Edit project)", () => {
+  let i = 0;
+  /** Unique, route-legal key (uppercase letters/digits only). */
+  const freshKey = (p: string) => `${p}${Date.now().toString(36)}${i++}`.toUpperCase();
+
+  it("saves the name and normalises the key (trim + uppercase)", async () => {
+    const key = freshKey("ED");
+    const p = await db.project.create({ data: { key, name: "Before" } });
+    const r = await updateProjectIdentity(p.id, { key: `  ${key.toLowerCase()}x  `, name: "  After  " }, db);
+    expect(r).toEqual({ ok: true, key: `${key}X`, name: "After" });
+    const after = await db.project.findUniqueOrThrow({ where: { id: p.id } });
+    expect(after.key).toBe(`${key}X`);
+    expect(after.name).toBe("After");
+  });
+
+  it("rejects a key another project already uses, and applies nothing at all", async () => {
+    const a = await db.project.create({ data: { key: freshKey("EA"), name: "A" } });
+    const b = await db.project.create({ data: { key: freshKey("EB"), name: "B" } });
+    const r = await updateProjectIdentity(b.id, { key: a.key.toLowerCase(), name: "B2" }, db);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).toContain("already used");
+    const bAfter = await db.project.findUniqueOrThrow({ where: { id: b.id } });
+    expect(bAfter.key).toBe(b.key);
+    expect(bAfter.name).toBe("B"); // name + key move together → neither was applied
+  });
+
+  it("accepts the project's own key (any casing) and updates the name alone", async () => {
+    const p = await db.project.create({ data: { key: freshKey("EC"), name: "C" } });
+    const r = await updateProjectIdentity(p.id, { key: p.key.toLowerCase(), name: "C renamed" }, db);
+    expect(r).toEqual({ ok: true, key: p.key, name: "C renamed" });
+  });
+
+  it("task keys follow the project key — nothing is stored per task", async () => {
+    const key = freshKey("EG");
+    const p = await db.project.create({ data: { key, name: "G" } });
+    expect(taskKey(p.key, 7)).toBe(`${key}-7`);
+    expect((await updateProjectIdentity(p.id, { key: `${key}Z` }, db)).ok).toBe(true);
+    const after = await db.project.findUniqueOrThrow({ where: { id: p.id } });
+    expect(taskKey(after.key, 7)).toBe(`${key}Z-7`);
   });
 });

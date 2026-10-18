@@ -1,4 +1,5 @@
 import type { jsPDF } from "jspdf";
+import type { DashboardSummary } from "./dashboard";
 import { occursOn } from "./calendar";
 
 /**
@@ -349,5 +350,147 @@ export async function buildCalendarPdf(input: CalendarPdfInput): Promise<jsPDF> 
   });
 
   footer(c, `TaskTracker · Calendar · ${input.generatedAt.toLocaleDateString()}`);
+  return doc;
+}
+
+/* ── Dashboard PDF ────────────────────────────────────────────────────── */
+
+export interface DashboardPdfInput {
+  /** "All projects" or "LVM · Letter View Management". */
+  scopeLabel: string;
+  generatedAt: Date;
+  summary: DashboardSummary;
+  assigned: { key: string; title: string; status: string; priority: string }[];
+  qaQueue: { key: string; title: string; status: string; priority: string }[];
+  overdue: { key: string; title: string; due: string }[];
+  recent: { key: string; title: string; action: string; actor: string; when: string }[];
+  projects: { key: string; name: string }[];
+}
+
+/**
+ * Change request: "Download the entire dashboard as PDF" — built from the same
+ * data the page renders (KPI numbers, section lists and chart datasets), so
+ * everything below the fold is included by construction and every block flows
+ * across as many A4 pages as it needs (the shared ctx handles page breaks).
+ */
+export async function buildDashboardPdf(input: DashboardPdfInput): Promise<jsPDF> {
+  const doc = await openPdf("portrait");
+  const c = ctx(doc, 16);
+
+  text(c, "TASKTRACKER", { size: 8, color: "#94a3b8", gap: 1 });
+  text(c, "Dashboard", { size: 16, bold: true, gap: 0.5 });
+  text(c, input.scopeLabel, { size: 10, color: "#64748b", gap: 0.5 });
+  text(c, `Generated ${input.generatedAt.toLocaleString()}`, { size: 8, color: "#94a3b8" });
+
+  const s = input.summary;
+  const half = pageWidth(c) / 2;
+  const pairs = (items: [string, string][]) => {
+    for (const [k, v] of items) {
+      ensure(c, 5.5);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      setTextColor(c, "#64748b");
+      doc.text(k, c.margin, c.y + 3.2);
+      setTextColor(c);
+      doc.setFont("helvetica", "bold");
+      doc.text(v, c.margin + half, c.y + 3.2);
+      c.y += 5.5;
+    }
+  };
+
+  section(c, "Key numbers");
+  pairs([
+    ["Total tasks", String(s.totals.all)],
+    ["Completed", `${s.totals.done} (${s.completionPct}%)`],
+    ["In progress", String(s.totals.inProgress)],
+    ["Pending", String(s.totals.pending)],
+    ["Overdue", String(s.totals.overdue)],
+    ["Open tasks", String(s.totals.open)],
+    ["My open tasks", String(s.myOpen)],
+    ["My overdue tasks", String(s.myOverdue)],
+    ["Projects in view", String(s.projectCount)],
+  ]);
+
+  section(c, "Completion & timers");
+  pairs([
+    ["Completion rate", `${s.completionPct}%`],
+    ["Done of all", `${s.totals.done} of ${s.totals.all}`],
+    ["Timers running", String(s.runningNow)],
+    ["Timers overdue", String(s.timerOverdue)],
+  ]);
+
+  const maxOf = (xs: number[]) => Math.max(1, ...xs);
+
+  if (s.byStatus.length) {
+    section(c, "Tasks by status");
+    const max = maxOf(s.byStatus.map((x) => x.count));
+    for (const x of s.byStatus) barRow(c, x.name, x.count, max, x.color);
+  }
+
+  if (s.byPriority.length) {
+    section(c, "Tasks by priority");
+    const max = maxOf(s.byPriority.map((x) => x.count));
+    for (const x of s.byPriority) barRow(c, x.name, x.count, max, x.color);
+  }
+
+  if (s.perMember.length) {
+    section(c, "Open tasks per member");
+    const max = maxOf(s.perMember.map((x) => x.count));
+    for (const x of s.perMember) barRow(c, x.name, x.count, max, "#3b82f6");
+  }
+
+  const taskCols = [
+    { header: "Key", w: 26 },
+    { header: "Title", w: pageWidth(c) - 26 - 30 - 26 },
+    { header: "Status", w: 30 },
+    { header: "Priority", w: 26 },
+  ];
+  const taskRow = (t: { key: string; title: string; status: string; priority: string }) =>
+    [t.key, t.title, t.status, t.priority];
+
+  section(c, `Assigned to me (${input.assigned.length})`);
+  if (input.assigned.length === 0) text(c, "Nothing assigned to you right now.", { size: 8, color: "#64748b" });
+  else table(c, taskCols, input.assigned.map(taskRow));
+
+  section(c, `Waiting for my testing (${input.qaQueue.length})`);
+  if (input.qaQueue.length === 0) text(c, "No task is waiting for your testing.", { size: 8, color: "#64748b" });
+  else table(c, taskCols, input.qaQueue.map(taskRow));
+
+  section(c, `Overdue (${input.overdue.length})`);
+  if (input.overdue.length === 0) text(c, "Nothing overdue — nice.", { size: 8, color: "#64748b" });
+  else {
+    table(
+      c,
+      [{ header: "Key", w: 30 }, { header: "Title", w: pageWidth(c) - 30 - 26 }, { header: "Due", w: 26 }],
+      input.overdue.map((t) => [t.key, t.title, t.due]),
+    );
+  }
+
+  section(c, `Recently changed (${input.recent.length})`);
+  if (input.recent.length === 0) text(c, "No activity yet.", { size: 8, color: "#64748b" });
+  else {
+    table(
+      c,
+      [
+        { header: "Key", w: 26 },
+        { header: "Task", w: pageWidth(c) - 26 - 28 - 30 - 26 },
+        { header: "Change", w: 28 },
+        { header: "By", w: 30 },
+        { header: "When", w: 26 },
+      ],
+      input.recent.map((a) => [a.key, a.title, a.action, a.actor, a.when]),
+    );
+  }
+
+  if (input.projects.length) {
+    section(c, `Projects (${input.projects.length})`);
+    table(
+      c,
+      [{ header: "Key", w: 30 }, { header: "Name", w: pageWidth(c) - 30 }],
+      input.projects.map((p) => [p.key, p.name]),
+    );
+  }
+
+  footer(c, `TaskTracker · Dashboard · ${input.generatedAt.toLocaleDateString()}`);
   return doc;
 }

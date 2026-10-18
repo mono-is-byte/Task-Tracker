@@ -10,9 +10,8 @@ per-project roles, field-level permissions, custom workflows and automation.
 [![Prisma](https://img.shields.io/badge/Prisma-7-2D3748?logo=prisma&logoColor=white)](https://www.prisma.io/)
 [![SQLite](https://img.shields.io/badge/SQLite-better--sqlite3-003B57?logo=sqlite&logoColor=white)](https://github.com/WiseLibs/better-sqlite3)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
-[![Tests](https://img.shields.io/badge/tests-120_passing-2ea44f?logo=vitest&logoColor=white)](./tests)
+[![Tests](https://img.shields.io/badge/tests-197_passing-2ea44f?logo=vitest&logoColor=white)](./tests)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520.9-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![License](https://img.shields.io/badge/license-ISC-blue)](#license)
 
 ---
 
@@ -38,6 +37,7 @@ per-project roles, field-level permissions, custom workflows and automation.
 - [Excel Import / Export](#excel-import--export)
 - [Testing](#testing)
 - [Developer Scripts](#developer-scripts)
+- [Troubleshooting](#troubleshooting)
 - [Security Notes](#security-notes)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
@@ -54,11 +54,11 @@ the weight of an enterprise suite.
 
 The app is built on **Next.js 16 (App Router) + Prisma 7 + SQLite (via `better-sqlite3`)**,
 so a fresh clone runs with **zero external services**: no database server, no Docker, no
-cloud account. The Prisma schema uses only portable types, so switching to PostgreSQL
-later means changing the datasource provider, setting `DATABASE_URL`, and running
-`prisma migrate deploy`.
+cloud account. The Prisma schema uses only portable types, so a PostgreSQL move is
+mainly a datasource-provider change — note the committed migrations are SQLite SQL and
+would be regenerated for the new database.
 
-> **Status:** actively developed — 120 automated tests, full server-side permission
+> **Status:** actively developed — 197 automated tests, full server-side permission
 > enforcement, and light/dark theming.
 
 ---
@@ -67,27 +67,55 @@ later means changing the datasource provider, setting `DATABASE_URL`, and runnin
 
 ### 🗂️ Tasks & work management
 - **Board (Kanban)** with drag-and-drop status changes and per-column quick-add.
-- **Table view** with inline editing, resizable columns, filters and a task drawer.
+- **Table view** with inline editing, resizable columns, filters and a task drawer; row
+  deletion goes through a confirmation dialog, and the hidden-column + width layout is
+  remembered on the device per project (survives reloads).
+- **One task store per project** — the Board, Table, Timeline and drawer read and write the
+  same rows (optimistic updates, rollback on failure, SSE refresh), so a change in one view
+  appears in the others immediately and no duplicate tasks are created.
 - **Task drawer** for comments, activity history, links (`blocks` / `relates`), labels,
   custom fields and Git branch.
 - **Task Timer** per stage: statuses define a timer role (`NONE` / `TRACK` / `FINAL`) so a
   running segment can be started and stopped, auto-stops when the task moves on, and shows
   total time once the task is Done.
 - **Epics, stories** and structured task types (Task / Story / Bug / Epic / Sub-task).
+- **Priorities & issue types** are managed per project in Settings — create, edit
+  (name / level / colour) and delete with duplicate checks; deleting an option that tasks
+  still use asks for a replacement and moves those tasks over, so nothing is left pointing
+  at a removed option.
 
 ### 📊 Views & reporting
-- **Dashboard** with summary stats, tasks-by-status / priority / member bars, "assigned to
-  me", the QA queue, overdue work and a recent-activity feed.
-- **Timeline** with task, timer, start/due dates, estimates, logged time and duration bars.
-- **Workload** against per-project and per-user working hours.
-- **Calendar** (month/week) with a My/All toggle, project and assignee filters, holiday
-  highlighting and PDF export.
-- **Reports**: status distribution, open tasks per assignee, QA queue, estimate vs actual,
+- **Dashboard** with KPI cards (Total / Completed / In progress / Pending / Overdue), a
+  completion progress bar, tasks-by-status / priority / member bars, "assigned to me", the
+  QA queue, overdue work and a recent-activity feed — all computed from the saved tasks,
+  with the whole page exportable to PDF and Excel.
+- **Timeline** covering the whole project: a Day / Week / Month zoom plus a **Fit entire project**
+  button, a header axis with a today marker, task, timer, start/due dates, estimates and logged
+  time in one frozen grid — bars are positioned from each task's start → due date (falling back
+  to timer instants), the project range strip shows the configured project dates or the earliest
+  start / latest due date, and tasks without dates are still listed instead of breaking the chart.
+- **Workload** against per-project and per-user working hours, honouring holidays and
+  working-day exceptions.
+- **Calendar** (month/week) with a My/All toggle, project and assignee filters, a colour
+  legend and PDF export — Friday/Saturday weekly holidays use a light `#fff2f2` tint,
+  configured holidays a stronger red, and working-day exceptions light yellow.
+- **Holiday management** in Calendar Settings: a single-line add row (name, start, end, type)
+  and read-only rows with an **Edit** button that swaps in date/name/type inputs plus Save/Cancel,
+  so saved holidays can be updated without an always-visible edit form; duplicates and reversed
+  ranges are rejected. "Working-day exception" toggles open the office on a holiday without
+  deleting it. (A holiday `description` that was saved earlier stays stored and still shows in
+  the calendar tooltip — it is simply no longer edited here.)
+- **Reports**: status distribution, open tasks per assignee, a standalone **QA Queue — In
+  Testing per Tester** section (own heading and container, grouped by tester with counts, fed by
+  the shared task store so status/tester changes appear without a reload), estimate vs actual,
   and overdue — exportable to PDF.
 - **Archive** is a filtered view of Done tasks, not a separate store.
 
 ### 🔐 Workflow, roles & permissions
-- Custom **statuses**, **transitions** and **workflow** per project, editable in Settings.
+- Custom **statuses**, **transitions** and **workflow** per project, editable in Settings:
+  the Transitions card is a compact From / To / Allowed-roles table with add and remove
+  actions, inline role editing and duplicate/same-status guards (empty roles = every role;
+  Admin/PM may always move to any status).
 - **Forward-only** status moves with a manager bypass, enforced on the server.
 - **Multi-role membership** — a user can hold several roles in one project; effective
   permissions are the union of them.
@@ -96,22 +124,47 @@ later means changing the datasource provider, setting `DATABASE_URL`, and runnin
 - **Server-side enforcement** on every endpoint (401/403 + a friendly no-access page);
   the UI only hides or disables.
 - **Automation rules** driven from Settings (e.g. stamp dates on status change, notify a
-  tester or assignee, clear the end date on re-open).
+  tester or assignee, clear the end date on re-open) — the rules card sits directly below
+  Priorities & issue types, and every Settings card shares one heading/helper/spacing pattern
+  that stacks cleanly on narrow screens.
 
 ### 💬 Collaboration & notifications
 - Threaded **comments**, **remarks** and **feedback** per task.
-- **Notifications** bell with per-user preferences.
+- **Notifications** bell with a live unread counter, task deep links and a Mark-all-read action.
 - **Realtime updates** over SSE (`/api/projects/:id/events`) with a 15-second polling
   fallback.
 
 ### 🛠️ Administration & security
 - **Users** page: create users, edit profiles, upload avatars (`.jpg` / `.jpeg`, ≤ 2 MB),
   and manage project memberships; deletes are soft deletes so history is preserved.
-- **Designations** are free-text job titles that grant no permissions.
+- **Designations** are references to a role from Roles & Permissions and grant no
+  permissions by themselves; every picker shows users as `Name - Designation` and the
+  Roles page counts the users holding each designation.
+- **Assignments and testing** are drawn from the whole user directory: any non-deleted
+  user can be an assignee or tester in any project (deactivated accounts stay selectable
+  and are labelled *inactive*).
 - **Audit log** for logins, failed logins, lockouts, permission changes and resets.
+- **Project Members** is one compact card: a one-line add form (user + role), a table with
+  avatar, name/designation, role chips and joined date, and removal behind a confirmation
+  dialog.
 - **Cookie-session auth** with login rate limiting and lockout, absolute/idle expiry,
-  remember-me, forced password change on first login, and a self-service session list.
-- **Password resets** are admin-triggered by default, or token-based when SMTP is configured.
+  remember-me, forced password change on first login, and a self-service **Active
+  Sessions** list on the Profile page: the real browser/OS is parsed from the user agent
+  (missing parts are labelled unknown — nothing is invented), status and last activity are
+  derived from the server timestamps with relative times, the list has its own scroll
+  container, and a single session or every other session can be revoked after a
+  confirmation.
+- The **Profile page** centres one card that groups name/avatar, the email-change flow and
+  the password-change form (labelled fields, never the password itself), keeping the
+  existing validation, busy states and real backend flow; Active Sessions sits below it.
+- **Self-service email change** from the Profile page: the current password re-authenticates the
+  change, the address is normalised to lower case and checked against every other account's
+  email **and** username, the same user row (id, projects, tasks, sessions) is kept and the
+  change is audited. Sign-in with the new address works immediately — this deployment has no
+  mail provider, so there is no confirmation link step.
+- **Password resets** are admin-triggered by default; with `SMTP_URL` set, a one-hour reset
+  token is issued and written to the server log for the operator to deliver (no mailer is
+  bundled).
 - **Security headers** (`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`,
   `Permissions-Policy`) set in `next.config.ts`.
 - No public sign-up — accounts are created by administrators by design.
@@ -121,6 +174,12 @@ later means changing the datasource provider, setting `DATABASE_URL`, and runnin
 - UTF-8 end-to-end with **NFC-normalized, Bangla-safe search** and the Noto Sans Bengali
   font loaded as a fallback for user-entered text.
 - **Light / dark theme** persisted per device and per profile.
+- **Collapsible sidebar** with one toggle button: on desktop it collapses the navigation to a
+  compact icon rail (labels hidden, every link still reachable, hover tooltips, project key
+  badges as icons) and expands it back; on phones/tablets the same button opens an overlay
+  drawer that closes on navigation and locks background scrolling. The choice is remembered
+  per device and restored before first paint (no flicker), and page content smoothly reclaims
+  the freed space.
 
 ---
 
@@ -136,7 +195,7 @@ later means changing the datasource provider, setting `DATABASE_URL`, and runnin
 | Validation | **Zod 4** | Request/query validation |
 | Spreadsheets | **xlsx** | Excel / CSV import and export |
 | PDF | **jspdf** | Report and calendar exports |
-| Testing | **Vitest 5** | 120 tests across 10 files |
+| Testing | **Vitest 5** | 197 tests across 15 files |
 | Tooling | **tsx**, **PostCSS** | Seed runner and CSS pipeline |
 
 ---
@@ -154,14 +213,15 @@ Task-Tracker/
 │  ├─ _apply-migration.mjs   # applies committed migrations to the dev database
 │  ├─ crawl-check.mjs        # logs in and crawls every page / API route
 │  ├─ import-check.mjs       # CSV/XLSX import smoke check
-│  └─ sse-check.mjs          # realtime (SSE) smoke check
+│  ├─ sse-check.mjs          # realtime (SSE) smoke check
+│  └─ remove-customer-impact-option.mjs  # one-off: legacy option-value cleanup
 ├─ src/
 │  ├─ app/
 │  │  ├─ (app)/              # authenticated shell
 │  │  │  ├─ page.tsx         # dashboard
 │  │  │  ├─ calendar/        # month / week calendar
 │  │  │  ├─ users/           # user administration
-│  │  │  ├─ profile/         # profile, capacity, sessions, avatar
+│  │  │  ├─ profile/         # profile, email, password, sessions, avatar
 │  │  │  ├─ admin/           # roles & permissions, audit log
 │  │  │  └─ p/[id]/          # board, table, timeline, workload,
 │  │  │                      # reports, archive, members, settings
@@ -191,7 +251,7 @@ Task-Tracker/
 ### 1. Clone & install
 
 ```bash
-git clone https://github.com/monowarulislam-byte/Task-Tracker.git
+git clone https://github.com/mono-is-byte/Task-Tracker.git
 cd Task-Tracker
 npm install
 ```
@@ -267,9 +327,9 @@ accounts for local development only:
 |---|---|---|
 | `DATABASE_URL` | ✅ | `file:./dev.db` for SQLite; a `postgresql://…` URL after switching providers |
 | `SESSION_SECRET` | ✅ | Long random string used for signing; sessions themselves are opaque, hashed tokens |
-| `APP_URL` | — | Base URL of the app; enables `Secure` cookies when set to `https://…` |
-| `SMTP_URL` | — | If set, forgot-password issues emailed reset links; if unset, resets are admin-triggered |
-| `SMTP_FROM` | — | From address used for reset emails when `SMTP_URL` is set |
+| `APP_URL` | — | Base URL of the app; cookies are marked `Secure` when it starts with `https://` (and always in production) |
+| `SMTP_URL` | — | If set, forgot-password issues a one-hour reset token and writes it to the server log for an operator to deliver; if unset, users are told to ask an admin |
+| `SMTP_FROM` | — | From address intended for mail delivery — not read by the current build, which logs reset tokens instead of sending mail |
 
 Copy `.env.example` to `.env` and fill in your own values — the template contains
 placeholders only.
@@ -285,8 +345,9 @@ npm start
 
 - `npm start` reads `.env` and serves on **http://localhost:3000** by default.
 - Set `PORT` to serve on a different port.
-- For a hosted database, change the Prisma datasource provider to `postgresql`, set
-  `DATABASE_URL`, and run `npx prisma migrate deploy`.
+- For a hosted database, change the Prisma datasource provider to `postgresql` and set
+  `DATABASE_URL`; the committed migrations are SQLite SQL and would be regenerated
+  against the new database.
 
 ---
 
@@ -306,8 +367,9 @@ npm start
 6. **Admins** manage users at **Users**, roles and field rules at **Admin → Roles &
    Permissions**, and review activity at **Admin → Audit Log**.
 
-Use the **Calendar** (`/calendar`) for a cross-project month/week view, and the
-**☀ / 🌙** toggle for theming.
+Use the **Calendar** (`/calendar`) for a cross-project month/week view — **Calendar
+Settings** manages holiday date ranges and working-day exceptions — and the **☀ / 🌙**
+toggle for theming.
 
 ### Roles at a glance
 
@@ -326,8 +388,9 @@ editable in the permission matrix.
 
 - **Task key** = `{PROJECT}-{serial}` (for example `MAP-12`).
 - **Est. Days is always calculated** (`Est. Hours ÷ hours-per-day`) and never typed. The
-  default is 8 hours/day, configurable per project (Settings) and per user (Profile →
-  capacity override).
+  default is 8 hours/day, configured per project in Settings; the per-user capacity override
+  is no longer edited from the Profile page (the stored value, if any, and the project-level
+  setting keep driving every calculation).
 - **Archive is a derived view** of Done tasks; re-opening moves tasks back out.
 - **Permissions are enforced server-side** on every endpoint, including the status-only
   change rule that lets QA advance work while field edits stay locked.
@@ -365,14 +428,19 @@ From the Table view:
 npm test
 ```
 
-The suite runs **120 tests across 10 files** with Vitest. A `pretest` step
+The suite runs **197 tests across 15 files** with Vitest. A `pretest` step
 (`scripts/pretest.mjs`) builds scratch databases under `tests/` from the committed
 migration SQL — the dev database is never touched.
 
-Coverage includes the domain rules (Fibonacci story points, Est. Days math, transitions),
-permissions and field rules, authentication (login/logout, lockout, session expiry),
-timer derivation, calendar and holiday logic, dashboard aggregation, PDF generation,
-user management and Bangla-safe search.
+Coverage includes the domain rules (Fibonacci story points, Est. Days math, transitions,
+working-day capacity with holidays and exceptions), permissions and field rules,
+authentication (login/logout, lockout, session expiry, self-service email change with
+re-authentication and duplicate/username collisions), session display helpers (device
+parsing, status, relative times), project lookup CRUD (duplicate rejection, deleting an
+in-use option with task reassignment), timer derivation, calendar and holiday logic (date
+ranges, duplicate detection, working-day exceptions), timeline maths (day-key ranges,
+project range derivation, zoom scale, axis ticks, bar geometry), QA queue grouping,
+dashboard aggregation, PDF generation, user management and Bangla-safe search.
 
 ---
 
@@ -391,6 +459,24 @@ user management and Bangla-safe search.
 
 ---
 
+## Troubleshooting
+
+- **`npm run seed` skips on a used database** — that is by design ("Seed skipped: users
+  already exist. Use --reset to reseed."). Run `npm run seed -- --reset` to wipe and
+  reseed, or create users inside the app instead.
+- **Prisma client out of sync after pulling schema changes** — `npm install` runs
+  `prisma generate` for you; if you skipped it, run `npx prisma generate` and restart the
+  dev server.
+- **Port 3000 is already taken** — serve elsewhere, e.g. `PORT=4000 npm run dev`
+  (PowerShell: `$env:PORT=4000; npm run dev`).
+- **Tests fail against a stale scratch database** — `pretest` only applies migrations to
+  missing or empty `tests/test-*.db` files; delete the stale file(s) and rerun `npm test`
+  to rebuild them from the committed migrations.
+- **Sign-in fails on a fresh clone** — make sure `.env` exists and
+  `npx prisma migrate dev` has been run from the repository root.
+
+---
+
 ## Security Notes
 
 - **Never commit `.env`** or any real credentials. The repository tracks only
@@ -400,8 +486,9 @@ user management and Bangla-safe search.
 - Set `APP_URL` to an `https://` URL in production so cookies are marked `Secure`.
 - Login is rate-limited and locks out after repeated failures; administrators can unlock
   accounts and trigger password resets.
-- Password reset emails require a configured SMTP relay. Without one, resets are
-  admin-triggered — no mailer is bundled.
+- Password reset links are operator-delivered: with `SMTP_URL` set, a one-hour token is
+  written to the server log to hand over — no mailer is bundled, and without it resets
+  stay admin-triggered.
 
 ---
 
@@ -449,4 +536,5 @@ Please do not commit secrets, `.env` files, or generated databases (`*.db`).
 
 ## License
 
-Released under the **ISC License**, as declared in [`package.json`](./package.json).
+Declared as **ISC** in [`package.json`](./package.json). A standalone `LICENSE` file is
+not included yet — see the [Roadmap](#roadmap).

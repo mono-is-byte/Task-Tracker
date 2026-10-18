@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { api } from "@/lib/client";
 import { useProject } from "@/hooks/useProject";
 import { workingDaysBetween } from "@/lib/domain";
+import { IconWarning } from "@/components/icons";
 
 interface WTask {
   id: string; key: string; title: string;
@@ -27,13 +28,18 @@ export default function WorkloadPage() {
   const projectId = params.id;
   const { data: lookups } = useProject(projectId);
   const [tasks, setTasks] = useState<WTask[]>([]);
-  const [holidays, setHolidays] = useState<{ date: string }[]>([]);
+  // Holiday day keys (ranges already expanded by the API) + working-day
+  // exceptions: an exception turns a holiday/weekly holiday back into a
+  // working day for capacity, exactly like the calendar shows it.
+  const [holDates, setHolDates] = useState<string[]>([]);
+  const [exceptions, setExceptions] = useState<string[]>([]);
 
   useEffect(() => {
     api<{ tasks: WTask[] }>(`/api/projects/${projectId}/tasks?take=1000&archived=false`)
       .then((d) => setTasks(d.tasks)).catch(() => {});
-    api<{ holidays: { date: string }[] }>(`/api/projects/${projectId}/holidays`)
-      .then((d) => setHolidays(d.holidays)).catch(() => {});
+    api<{ dates: string[]; exceptions: string[] }>(`/api/projects/${projectId}/holidays`)
+      .then((d) => { setHolDates(d.dates ?? []); setExceptions(d.exceptions ?? []); })
+      .catch(() => {});
   }, [projectId]);
 
   const weeks = useMemo(() => {
@@ -47,11 +53,15 @@ export default function WorkloadPage() {
     });
   }, []);
 
-  const holDates = useMemo(() => holidays.map((h) => new Date(h.date).toISOString().slice(0, 10)), [holidays]);
-
   if (!lookups) return <p className="text-sm">Loading…</p>;
 
-  const rows = lookups.members.map((mem) => {
+  // One row per project member, plus anyone with a task assigned in this project
+  // (tasks can be assigned to a registered user who is not a project member) —
+  // so no assignment is missing from the workload view.
+  const assignedIds = new Set(tasks.map((t) => t.assigneeId).filter((id): id is string => Boolean(id)));
+  const people = lookups.members.filter((m) => m.isMember || assignedIds.has(m.userId));
+
+  const rows = people.map((mem) => {
     const rate = mem.hoursPerDay ?? lookups.project.hoursPerDay;
     const mine = tasks.filter((t) => t.assigneeId === mem.userId);
     const cells = weeks.map((w) => {
@@ -61,7 +71,7 @@ export default function WorkloadPage() {
         return s <= w.end && e >= w.start;
       });
       const planned = Math.round(overlap.reduce((a, t) => a + (t.estHours ?? 0), 0) * 100) / 100;
-      const cap = rate * workingDaysBetween(w.start, w.end, lookups.project.workingDays, holDates);
+      const cap = rate * workingDaysBetween(w.start, w.end, lookups.project.workingDays, holDates, exceptions);
       return { planned, cap, over: planned > cap, n: overlap.length };
     });
     return { mem, cells, total: mine.length };
@@ -89,10 +99,18 @@ export default function WorkloadPage() {
           <tbody>
             {rows.map(({ mem, cells, total }) => (
               <tr key={mem.userId} className="border-t dark:border-slate-800">
-                <td className="p-2 font-semibold">{mem.name}<br /><span className="font-normal text-slate-500">{total} active task(s)</span></td>
+                <td className="p-2 font-semibold">
+                  {mem.name}
+                  {!mem.isMember && <span className="ml-1 rounded bg-line px-1 text-[10px] font-normal text-muted" title="Assigned to work in this project without project membership">not a member</span>}
+                  <br /><span className="font-normal text-slate-500">{total} active task(s)</span>
+                </td>
                 {cells.map((c, i) => (
                   <td key={i} className={`p-2 ${c.over ? "bg-red-100 font-bold text-red-800 dark:bg-red-950 dark:text-red-200" : ""}`}>
-                    {c.planned}h / {c.cap}h {c.over ? "⚠ OVER" : ""} <span className="text-slate-500">({c.n})</span>
+                    {c.planned}h / {c.cap}h{c.over && (
+                      <span className="ml-1 inline-flex items-center gap-0.5 align-middle" title="Planned hours exceed the capacity for this week">
+                        <IconWarning className="h-3 w-3" /> OVER
+                      </span>
+                    )} <span className="text-slate-500">({c.n})</span>
                   </td>
                 ))}
               </tr>

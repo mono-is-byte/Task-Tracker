@@ -66,7 +66,21 @@ export interface CalendarTask {
 }
 
 export interface CalendarHoliday {
-  id: string; date: string; name: string;
+  id: string;
+  /** First day of the holiday, YYYY-MM-DD. */
+  date: string;
+  /** Last day (inclusive); equal to `date` for single-day holidays. */
+  endDate: string;
+  name: string;
+  description: string;
+  type: string;
+}
+
+/** A working-day exception ("Office Open") — see lib/holidayDates precedence. */
+export interface CalendarException {
+  id: string;
+  date: string;
+  note: string;
 }
 
 export interface CalendarFilters {
@@ -85,6 +99,8 @@ export interface CalendarData {
   members: { userId: string; name: string }[];
   tasks: CalendarTask[];
   holidays: CalendarHoliday[];
+  /** Working-day exceptions inside the fetched window (global, like holidays). */
+  exceptions: CalendarException[];
 }
 
 async function scopeProjectIds(client: PrismaClient, user: CalendarUser): Promise<string[]> {
@@ -123,7 +139,7 @@ export async function fetchCalendarData(
     filters.assigneeId === "none" ? { assigneeId: null } :
     filters.assigneeId ? { assigneeId: filters.assigneeId } : {};
 
-  const [tasks, holidays, members] = await Promise.all([
+  const [tasks, holidays, exceptions, memberRows] = await Promise.all([
     client.task.findMany({
       where: { projectId: { in: scope }, OR: overlap, ...assignee },
       include: {
@@ -133,7 +149,20 @@ export async function fetchCalendarData(
         project: { select: { key: true, name: true } },
       },
     }),
+    // Ranges overlap the window when they start before `to` and end after
+    // `from` — a holiday running through the window is included even when its
+    // start date is outside it (legacy single-day rows: endDate is NULL).
     client.holiday.findMany({
+      where: {
+        date: { lte: filters.to },
+        OR: [
+          { endDate: null, date: { gte: filters.from } },
+          { endDate: { gte: filters.from } },
+        ],
+      },
+      orderBy: [{ date: "asc" }, { name: "asc" }],
+    }),
+    client.workingDayException.findMany({
       where: { date: { gte: filters.from, lte: filters.to } },
       orderBy: { date: "asc" },
     }),
@@ -144,10 +173,17 @@ export async function fetchCalendarData(
     }),
   ]);
 
+  // The assignee filter must cover everyone who appears in the shown tasks:
+  // members of the scoped projects PLUS anyone assigned to a task in them —
+  // tasks can be assigned to a registered user who is not a project member.
+  const people = new Map<string, string>();
+  for (const m of memberRows) people.set(m.userId, m.user.name);
+  for (const t of tasks) if (t.assignee) people.set(t.assignee.id, t.assignee.name);
+
   return {
     canManageGlobal: user.isSuperAdmin,
     projects,
-    members: members.map((m) => ({ userId: m.userId, name: m.user.name })).sort((a, b) => a.name.localeCompare(b.name)),
+    members: [...people].map(([userId, name]) => ({ userId, name })).sort((a, b) => a.name.localeCompare(b.name)),
     tasks: tasks.map((t) => ({
       id: t.id, key: `${t.project.key}-${t.serial}`, title: t.title, serial: t.serial,
       projectId: t.projectId, projectKey: t.project.key, projectName: t.project.name,
@@ -160,8 +196,14 @@ export async function fetchCalendarData(
       timerState: timerInfo({ ...t, statusRole: t.status.timerRole } as TimerFields).state,
     })),
     holidays: holidays.map((h) => ({
-      id: h.id, date: dayKey(h.date), name: h.name,
+      id: h.id,
+      date: dayKey(h.date),
+      endDate: h.endDate ? dayKey(h.endDate) : dayKey(h.date),
+      name: h.name,
+      description: h.description ?? "",
+      type: h.type || "public",
     })),
+    exceptions: exceptions.map((e) => ({ id: e.id, date: dayKey(e.date), note: e.note ?? "" })),
   };
 }
 

@@ -22,6 +22,7 @@ import {
   saveAvatarFile,
   validateAvatarUpload,
 } from "../src/lib/avatar";
+import { designationCounts } from "../src/lib/roles";
 
 const TEST_URL = "file:./tests/test-users.db";
 const db = makeTestClient(TEST_URL);
@@ -388,5 +389,38 @@ describe("avatar uploads (Phase 4)", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * Item 4: the count shown next to a role on Roles & Permissions is the number
+ * of UNIQUE users whose designation is that role — not permission records, not
+ * tasks, not project-membership role links — and it ignores deleted users.
+ */
+describe("designation counts (Roles & Permissions)", () => {
+  it("counts unique non-deleted users per designation, not membership links", async () => {
+    const role = await db.role.create({ data: { name: uniq("CountRole"), permissions: "{}", fieldRules: "{}" } });
+    const u1 = await makeUser("count-1");
+    const u2 = await makeUser("count-2");
+    const u3 = await makeUser("count-3");
+
+    await db.user.update({ where: { id: u1 }, data: { designation: role.id } });
+    await db.user.update({ where: { id: u2 }, data: { designation: role.id } });
+    await db.user.update({ where: { id: u3 }, data: { designation: role.id } });
+
+    // Duplicate-looking membership role links must NOT change the number:
+    // u1 holds this role in TWO projects, u2's project role is not a designation.
+    await db.projectMember.create({ data: { projectId: fx.A.id, userId: u1, roles: { create: [{ roleId: role.id }] } } });
+    await db.projectMember.create({ data: { projectId: fx.B.id, userId: u1, roles: { create: [{ roleId: role.id }] } } });
+    await db.projectMember.create({ data: { projectId: fx.A.id, userId: u2, roles: { create: [{ roleId: role.id }] } } });
+
+    // A third designated user is soft-deleted → must be excluded.
+    const del = await softDeleteUser(db, { id: fx.users.admin, isSuperAdmin: true }, u3);
+    expect(del.ok).toBe(true);
+
+    const counts = await designationCounts(db);
+    expect(counts[role.id]).toBe(2); // u1 + u2, one per user
+    const fresh = await db.role.create({ data: { name: uniq("EmptyRole"), permissions: "{}", fieldRules: "{}" } });
+    expect(counts[fresh.id] ?? 0).toBe(0);
   });
 });

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { fail, ok, requireUser } from "@/lib/api";
+import { fail, ok, requireUser, serverError } from "@/lib/api";
 import { db } from "@/lib/db";
 import { fetchCalendarData, widenRange } from "@/lib/calendar";
 
@@ -39,8 +39,11 @@ export async function GET(req: Request) {
     });
     return ok(data);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Invalid calendar request.";
+    const msg = e instanceof Error ? e.message : "";
     if (msg === "No access to this project.") return fail(403, "forbidden", msg);
-    return fail(400, "validation", msg);
+    // Anything else at this point is a server-side failure (for example a
+    // database client generated before a migration) — report it as such instead
+    // of disguising it as a 400 "validation" error.
+    return serverError(e, "Could not load the calendar.");
   }
 }

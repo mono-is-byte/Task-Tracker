@@ -17,7 +17,7 @@ let fx: {
   A: string; B: string; C: string;
   S: Record<string, Record<string, string>>; // per project: todo/done
   P: Record<string, string>; // per project: High
-  users: { member: string; other: string };
+  users: { member: string; other: string; stranger: string };
 };
 
 beforeAll(async () => {
@@ -46,6 +46,10 @@ beforeAll(async () => {
     })).id;
   const member = await mkUser();
   const other = await mkUser();
+  // stranger: no membership and no tasks anywhere — must never appear in the
+  // calendar's people list (the assignee filter only offers people visible in
+  // the data: members of the scoped projects + assignees of the shown tasks).
+  const stranger = await mkUser();
   await db.projectMember.create({ data: { projectId: A, userId: member } });
   await db.projectMember.create({ data: { projectId: B, userId: member } });
   await db.projectMember.create({ data: { projectId: C, userId: other } });
@@ -69,7 +73,7 @@ beforeAll(async () => {
   await db.holiday.create({ data: { date: day(2), name: "Team Day" } });
   await db.holiday.create({ data: { date: day(3), name: "Other Day" } });
 
-  fx = { A, B, C, S, P, users: { member, other } };
+  fx = { A, B, C, S, P, users: { member, other, stranger } };
 });
 
 describe("calendar grid helpers", () => {
@@ -126,7 +130,11 @@ describe("fetchCalendarData scoping", () => {
     expect(holidayNames).toContain("Team Day");
     expect(holidayNames).toContain("Other Day");
     expect(data.members.map((m) => m.userId)).toContain(fx.users.member);
-    expect(data.members.map((m) => m.userId)).not.toContain(fx.users.other);
+    // `other` is assigned to a task in project A, so they are part of the data
+    // the member sees and belong in the assignee filter — but a user with no
+    // relation to the member's projects and tasks must never leak in.
+    expect(data.members.map((m) => m.userId)).toContain(fx.users.other);
+    expect(data.members.map((m) => m.userId)).not.toContain(fx.users.stranger);
   });
 
   it("superadmin sees everything", async () => {
@@ -168,13 +176,55 @@ describe("fetchCalendarData scoping", () => {
   });
 });
 
+describe("holiday ranges + working-day exceptions in the calendar feed", () => {
+  it("a range is returned when it merely overlaps the window, and legacy rows stay single-day", async () => {
+    const name = uniq("Range Day");
+    const created = await db.holiday.create({
+      data: { date: day(20), endDate: day(24), name, description: "Long weekend", type: "festival" },
+    });
+    const data = await fetchCalendarData(db, { id: fx.users.member, isSuperAdmin: true }, {
+      from: day(22), to: day(23),
+    });
+    const row = data.holidays.find((h) => h.id === created.id);
+    expect(row).toBeTruthy();
+    expect(row!.date).toBe(dayKey(day(20)));
+    expect(row!.endDate).toBe(dayKey(day(24)));
+    expect(row!.type).toBe("festival");
+    expect(row!.description).toBe("Long weekend");
+
+    // a pre-existing single-day holiday (endDate NULL) still reports one day
+    const aroundToday = await fetchCalendarData(db, { id: fx.users.member, isSuperAdmin: true }, {
+      from: day(-1), to: day(1),
+    });
+    const single = aroundToday.holidays.find((h) => h.name === "Global Day");
+    expect(single).toBeTruthy();
+    expect(single!.endDate).toBe(single!.date);
+  });
+
+  it("returns the working-day exceptions inside the window", async () => {
+    const date = day(21);
+    await db.workingDayException.upsert({
+      where: { date },
+      create: { date, note: "Office open (test)" },
+      update: { note: "Office open (test)" },
+    });
+    const data = await fetchCalendarData(db, { id: fx.users.member, isSuperAdmin: true }, {
+      from: day(20), to: day(22),
+    });
+    const ex = data.exceptions.find((e) => e.date === dayKey(date));
+    expect(ex).toBeTruthy();
+    expect(ex!.note).toBe("Office open (test)");
+  });
+});
+
 describe("dashboardSummary", () => {
   it("aggregates totals, overdue, per-status/priority/member", async () => {
     const s = await dashboardSummary(db, fx.users.member, false);
     // projectCount excludes the hidden project; its tasks still count
     expect(s.projectCount).toBe(1);
     //5 tasks total: a1-a4 in A + a5 in hidden B; a3 done; a1 overdue (a3 is done → not overdue)
-    expect(s.totals).toEqual({ all: 5, open: 4, done: 1, overdue: 1 });
+    expect(s.totals).toEqual({ all: 5, open: 4, done: 1, pending: 4, inProgress: 0, overdue: 1 });
+    expect(s.completionPct).toBe(20);
     expect(s.myOpen).toBe(2); // a1 + a5
     expect(s.myOverdue).toBe(1); // a1
     expect(s.byStatus.reduce((a, x) => a + x.count, 0)).toBe(5);

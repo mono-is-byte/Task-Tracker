@@ -11,6 +11,17 @@ export function fail(status: number, code: string, message: string, details?: un
   return Response.json({ error: { code, message, details } }, { status });
 }
 
+/**
+ * Turn an unexpected route failure (database/schema mismatch, connection loss,
+ * …) into a clean JSON 500. Without this, such a failure produced an EMPTY 500
+ * body — the calendar page then showed nothing at all, with no hint why. The
+ * real error still reaches the server log.
+ */
+export function serverError(e: unknown, message = "The server could not complete this request."): Response {
+  console.error("[api] unhandled route error:", e);
+  return fail(500, "server_error", message);
+}
+
 export async function readJson<T>(req: Request): Promise<{ value?: T; error?: Response }> {
   try {
     const value = (await req.json()) as T;

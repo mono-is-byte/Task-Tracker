@@ -57,6 +57,22 @@ export function clearSessionCookieHeader(): string {
   return `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
 }
 
+/**
+ * Cosmetic theme preference cookie (the "device choice" tier read by the root
+ * layout's inline script and by ThemeSync). JS-readable on purpose — the
+ * light/dark switch keeps it in sync — so it must never be HttpOnly.
+ */
+export function themeCookieHeader(theme: "light" | "dark", opts: { secure: boolean }): string {
+  const parts = [
+    `tt_theme=${theme}`,
+    "Path=/",
+    "SameSite=Lax",
+    `Max-Age=${60 * 60 * 24 * 365}`, // 1 year, mirrors ThemeToggle's document.cookie
+  ];
+  if (opts.secure) parts.push("Secure");
+  return parts.join("; ");
+}
+
 export async function createSession(
   client: Db,
   userId: string,
@@ -201,6 +217,38 @@ export async function revokeSession(client: Db, userId: string, sessionId: strin
   return true;
 }
 
+/**
+ * When a session last reached the server. `getSessionUser` refreshes
+ * `idleExpiresAt` to `now + IDLE_TTL_MS` on every authenticated request, so the
+ * stored deadline minus the TTL is exactly the timestamp of that last request.
+ * The profile page shows this as "Last active" — real activity data derived
+ * from the session table, never an estimate.
+ */
+export function sessionLastActiveAt(session: { idleExpiresAt: Date }): Date {
+  return new Date(session.idleExpiresAt.getTime() - IDLE_TTL_MS);
+}
+
+/** Sign out every active session of the user except `exceptSessionId` (the current one). */
+export async function revokeOtherSessions(
+  client: Db,
+  userId: string,
+  exceptSessionId: string | null,
+  actorId?: string,
+  ip?: string,
+): Promise<number> {
+  const others = await client.session.findMany({
+    where: {
+      userId,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+      ...(exceptSessionId ? { id: { not: exceptSessionId } } : {}),
+    },
+    select: { id: true },
+  });
+  for (const s of others) await revokeSession(client, userId, s.id, actorId, ip);
+  return others.length;
+}
+
 export async function changePassword(client: Db, userId: string, current: string, next: string, ip?: string) {
   const user = await client.user.findUnique({ where: { id: userId } });
   if (!user) return { ok: false as const, error: "User not found." };
@@ -214,6 +262,55 @@ export async function changePassword(client: Db, userId: string, current: string
   });
   await audit(client, { actorId: userId, action: "auth.password_change", entity: "user", entityId: userId, ip });
   return { ok: true as const };
+}
+
+/**
+ * Self-service email change. This app authenticates locally (sessions +
+ * bcrypt), so "reauthentication" means presenting the current password. The
+ * address is normalised to lower case exactly like `createUser` does, and
+ * duplicates are rejected — including an address that collides with another
+ * account's login USERNAME, because `login()` matches either identifier. The
+ * account id, memberships, tasks and running sessions are all untouched.
+ */
+export async function changeEmail(
+  client: Db,
+  userId: string,
+  input: { email: string; password: string },
+  ip?: string,
+) {
+  const user = await client.user.findUnique({ where: { id: userId } });
+  if (!user) return { ok: false as const, error: "User not found.", code: "not_found" as const };
+  if (!(await verifyPassword(input.password, user.passwordHash))) {
+    return { ok: false as const, error: "Current password is incorrect.", code: "reauth" as const };
+  }
+  const email = input.email.trim().toLowerCase();
+  if (!email || email === user.email.toLowerCase()) {
+    return { ok: false as const, error: "That is already your email address.", code: "unchanged" as const };
+  }
+  const clash = await client.user.findFirst({
+    where: { id: { not: userId }, OR: [{ email }, { username: email }] },
+    select: { email: true, username: true },
+  });
+  if (clash) {
+    return {
+      ok: false as const,
+      error:
+        clash.email === email
+          ? "That email address is already used by another account."
+          : "That address is already used as another account's username.",
+      code: "conflict" as const,
+    };
+  }
+  const updated = await client.user.update({ where: { id: userId }, data: { email } });
+  await audit(client, {
+    actorId: userId,
+    action: "auth.email_change",
+    entity: "user",
+    entityId: userId,
+    meta: { before: user.email, after: email },
+    ip,
+  });
+  return { ok: true as const, user: updated };
 }
 
 /** Admin-triggered reset: sets a temp password, forces change on next login. Returns the temp password. */
@@ -237,7 +334,7 @@ export async function createUser(
   client: Db,
   adminId: string,
   input: {
-    email: string; username: string; name: string; isSuperAdmin?: boolean; locale?: string;
+    email: string; username: string; name: string; isSuperAdmin?: boolean;
     /** Designation = a Role id (the route validates it exists before calling). */
     designation?: string | null;
   },
@@ -253,7 +350,6 @@ export async function createUser(
       passwordHash: await hashPassword(temp),
       mustChangePassword: true,
       isSuperAdmin: input.isSuperAdmin ?? false,
-      locale: input.locale ?? "en",
       designation,
     },
   });

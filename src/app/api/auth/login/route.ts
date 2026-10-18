@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { fail, ok, readJson, clientIp } from "@/lib/api";
-import { audit, createSession, login, sessionCookieHeader } from "@/lib/auth";
+import { audit, createSession, login, sessionCookieHeader, themeCookieHeader } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 const Body = z.object({
@@ -31,5 +31,13 @@ export async function POST(req: Request) {
     },
   });
   res.headers.set("Set-Cookie", sessionCookieHeader(result.token, { rememberMe: rememberMe ?? false, secure }));
+  // Seed the theme cookie from the saved profile when this device has no explicit
+  // choice yet, so the root layout's no-FOUC script can apply it before first paint.
+  // Precedence is unchanged: an existing device choice always wins.
+  const profileTheme = result.user.theme;
+  const deviceChoseTheme = /(?:^|;\s*)tt_theme=/.test(req.headers.get("cookie") ?? "");
+  if (!deviceChoseTheme && (profileTheme === "light" || profileTheme === "dark")) {
+    res.headers.append("Set-Cookie", themeCookieHeader(profileTheme, { secure }));
+  }
   return res;
 }

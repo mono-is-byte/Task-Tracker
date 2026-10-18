@@ -1,17 +1,18 @@
 "use client";
 
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { api, fmtDate } from "@/lib/client";
 import { useProject } from "@/hooks/useProject";
 import { useTicker } from "@/hooks/useTicker";
 import { useTasks, patchTask, createTask, timerAction, refreshTasks, type TaskRow } from "@/lib/taskStore";
 import { fmtDateTime, fmtDur, timerChipClass, timerSummary } from "@/lib/timerFormat";
-import { memberLabel } from "@/lib/memberLabel";
+import { memberLabel, userOptionLabel } from "@/lib/memberLabel";
 import Avatar from "@/components/Avatar";
 import TaskDrawer from "@/components/TaskDrawer";
 import TaskMenu from "@/components/TaskMenu";
 import AssignStepDialog from "@/components/AssignStepDialog";
+import { IconCheck, IconDownload, IconLock, IconPause, IconPlay, IconPlus, IconUpload, IconWarning } from "@/components/icons";
 
 /**
  * Table view — a fully editable, live view of the SAME task data used by the
@@ -23,9 +24,9 @@ import AssignStepDialog from "@/components/AssignStepDialog";
  * Inline editing rules: save on blur/Enter, cancel on Esc, optimistic with a
  * per-cell saving/saved/error indicator (the store rolls the row back when
  * the server rejects the change). Computed/system columns (key, est. days,
- * logged hours, total time, start time, created/updated) are read-only and
- * visually marked with 🔒. Status changes reuse the board's rules including
- * the Assign step and the stage-timer bookkeeping (server-side).
+ * total time, start time, created/updated) are read-only and
+ * visually marked with a lock icon. Status changes reuse the board's rules
+ * including the Assign step and the stage-timer bookkeeping (server-side).
  */
 
 type Task = TaskRow & {
@@ -45,19 +46,73 @@ type Task = TaskRow & {
   createdAt: string; updatedAt: string;
 };
 
+// Change request (table redesign): the "Labels", "Due" and "Logged" columns
+// are gone from the table. The task fields behind them (labels, dueAt,
+// loggedHours) are untouched — the drawer, board, reports and API keep using
+// them, and nothing in the database was rewritten.
 const BASE_COLS = [
   "key", "title", "status", "assignee", "priority", "type", "testedBy",
-  "dueAt", "startDate", "endDate", "estHours", "estDays", "rdTime", "labels",
+  "startDate", "endDate", "estHours", "estDays", "rdTime",
   "epic", "story", "description",
   "timerStart", "timerDue", "timerState", "timerActual",
-  "loggedHours", "createdAt", "updatedAt",
+  "createdAt", "updatedAt",
 ] as const;
 type BaseCol = (typeof BASE_COLS)[number];
 type Col = BaseCol | `cf:${string}`;
 /** Hidden by default (still available via "Hide column…"/show list). */
 const DEFAULT_HIDDEN: Col[] = ["description", "rdTime", "createdAt", "updatedAt"];
 
-const RO_COLS = new Set<Col>(["key", "estDays", "loggedHours", "timerStart", "timerActual", "createdAt", "updatedAt"]);
+const RO_COLS = new Set<Col>(["key", "estDays", "timerStart", "timerActual", "createdAt", "updatedAt"]);
+
+/** Numeric/duration columns read better right-aligned (table redesign). */
+const RIGHT_COLS = new Set<Col>([
+  "estHours", "estDays", "rdTime", "timerStart", "timerDue", "timerActual", "createdAt", "updatedAt",
+]);
+
+/**
+ * The per-project table layout (hidden columns + column widths) is remembered on
+ * the DEVICE, so hiding/showing columns or resizing a column survives a reload
+ * (requirement: "column show/hide preserved across sessions") without touching
+ * the API or other people's saved views. Storage can be unavailable (private
+ * mode), so everything is wrapped and invalid entries are dropped on read.
+ */
+const layoutKey = (projectId: string) => `tt_table_layout_${projectId}`;
+
+function readTableLayout(projectId: string): { hidden?: Col[]; widths?: Record<string, number> } {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(layoutKey(projectId));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as { hidden?: unknown; widths?: unknown };
+    const hidden = Array.isArray(parsed.hidden)
+      ? (parsed.hidden.filter((c) => typeof c === "string") as Col[])
+      : undefined;
+    let widths: Record<string, number> | undefined;
+    if (parsed.widths && typeof parsed.widths === "object" && !Array.isArray(parsed.widths)) {
+      widths = {};
+      for (const [k, v] of Object.entries(parsed.widths as Record<string, unknown>)) {
+        if (typeof v === "number" && Number.isFinite(v) && v >= 48) widths[k] = Math.round(v);
+      }
+    }
+    return { hidden, widths };
+  } catch {
+    return {};
+  }
+}
+
+function writeTableLayout(projectId: string, hidden: Col[], widths: Record<string, number>) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(layoutKey(projectId), JSON.stringify({ hidden, widths }));
+  } catch {
+    /* storage unavailable (private mode) — the layout simply won't persist */
+  }
+}
+
+// Before paint on the client, plain effect during SSR (where useLayoutEffect warns).
+// Same pattern as ThemeSync: the restore must be invisible, and the server render
+// must stay deterministic (reading storage during render would break hydration).
+const useBeforePaint = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 /** ISO → "YYYY-MM-DDTHH:mm" in local time (for datetime-local inputs). */
 function toLocalInput(v: unknown): string {
@@ -102,12 +157,22 @@ function useCellCommit(onCommit: (value: unknown) => Promise<unknown>) {
 function CellStatus({ status }: { status: "" | "saving" | "saved" | "error" }) {
   if (!status) return null;
   if (status === "saving") return <span className="ml-1 text-[10px] text-slate-400" title="Saving…">…</span>;
-  if (status === "saved") return <span className="ml-1 text-[10px] text-green-600 dark:text-green-400" title="Saved">✓</span>;
-  return <span className="ml-1 text-[10px] text-red-600 dark:text-red-400" title="Save failed — the cell was reverted">⚠</span>;
+  if (status === "saved") return <span className="ml-1 inline-flex align-middle text-green-600 dark:text-green-400" title="Saved"><IconCheck className="h-3 w-3" /></span>;
+  return <span className="ml-1 inline-flex align-middle text-red-600 dark:text-red-400" title="Save failed — the cell was reverted"><IconWarning className="h-3 w-3" /></span>;
+}
+
+/** The little lock that marks computed/system columns as read-only. */
+function LockMark() {
+  return <span className="ml-1 inline-flex align-middle text-slate-400"><IconLock className="h-3 w-3" /></span>;
 }
 
 const cellInput =
   "w-full min-w-20 rounded border border-transparent bg-transparent p-0.5 hover:border-slate-300 focus:border-slate-400 dark:hover:border-slate-600 dark:focus:border-slate-500";
+
+/** One compact toolbar control so the filter row, export buttons and saved
+ *  views all share the same height and border (change request: table redesign). */
+const fieldCls =
+  "h-8 rounded-md border border-line bg-surface px-2 text-xs focus:outline-none focus:ring-2 focus:ring-accent/30";
 
 function TextCell({ value, onCommit, col, multiline }: { value: string; onCommit: (v: unknown) => Promise<unknown>; col: Col; multiline?: boolean }) {
   const { status, run } = useCellCommit(onCommit);
@@ -214,68 +279,29 @@ function SelectCell({
   value, options, onCommit, col, renderOption,
 }: {
   value: string | null;
-  options: { id: string; name: string; hint?: string }[];
+  options: { id: string; name: string; hint?: string; retired?: boolean }[];
   onCommit: (v: unknown) => Promise<unknown>;
   col: Col;
   renderOption?: (o: { id: string; name: string }) => string;
 }) {
   const { status, run } = useCellCommit(onCommit);
+  // Change request: a task can still hold a value the configuration no longer
+  // offers (e.g. the removed Customer Impact option). Show the saved value
+  // instead of silently blanking the cell, label it as removed, and disable
+  // the entry so it is never offered for new/other edits.
+  const opts = value != null && value !== "" && !options.some((o) => o.id === value)
+    ? [...options, { id: value, name: `${value} (removed option)`, retired: true, hint: "Saved value — this option is no longer configured" }]
+    : options;
   return (
     <span className="flex items-center">
-      <select value={value ?? ""} title={options.find((o) => o.id === value)?.hint}
+      <select value={value ?? ""} title={opts.find((o) => o.id === value)?.hint}
         onChange={(e) => { if ((value ?? "") !== e.target.value) void run(e.target.value || null); }}
         onKeyDown={(e) => moveCellFocus(e, col)}
         className={`${cellInput} max-w-44`}>
         <option value="">—</option>
-        {options.map((o) => <option key={o.id} value={o.id}>{renderOption ? renderOption(o) : o.name}</option>)}
+        {opts.map((o) => <option key={o.id} value={o.id} disabled={o.retired}>{renderOption ? renderOption(o) : o.name}</option>)}
       </select>
       <CellStatus status={status} />
-    </span>
-  );
-}
-
-/** Labels: multi-select popover over every label used in the project. */
-function LabelsCell({ value, allLabels, onCommit, col }: { value: string[]; allLabels: string[]; onCommit: (v: unknown) => Promise<unknown>; col: Col }) {
-  const { status, run } = useCellCommit(onCommit);
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [picked, setPicked] = useState<string[]>(value);
-  useEffect(() => { setPicked(value); }, [value]);
-  const toggle = (l: string) =>
-    setPicked((p) => (p.includes(l) ? p.filter((x) => x !== l) : [...p, l]));
-  const commit = () => {
-    setOpen(false);
-    const next = [...new Set(picked)].sort();
-    if (JSON.stringify(next) !== JSON.stringify([...value].sort())) void run(next);
-  };
-  return (
-    <span className="relative flex items-center">
-      <button onClick={() => setOpen((v) => !v)} onKeyDown={(e) => moveCellFocus(e, col)}
-        className={`${cellInput} cursor-pointer text-left`} title="Edit labels">
-        {value.length ? value.join(", ") : <span className="text-slate-400">—</span>}
-      </button>
-      <CellStatus status={status} />
-      {open && (
-        <span className="absolute left-0 top-full z-30 mt-1 block w-56 rounded border border-line bg-surface p-2 shadow-lg">
-          {allLabels.map((l) => (
-            <label key={l} className="flex items-center gap-1 text-xs">
-              <input type="checkbox" checked={picked.includes(l)} onChange={() => toggle(l)} />{l}
-            </label>
-          ))}
-          <span className="mt-1 flex gap-1">
-            <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="new label"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && draft.trim()) { toggle(draft.trim()); setDraft(""); }
-                if (e.key === "Escape") setOpen(false);
-              }}
-              className="w-full rounded border p-0.5 text-xs dark:border-slate-700 dark:bg-slate-800" />
-          </span>
-          <span className="mt-1 flex justify-end gap-1">
-            <button onClick={() => setOpen(false)} className="rounded border px-1 text-[10px]">Cancel</button>
-            <button onClick={commit} className="rounded bg-indigo-600 px-1 text-[10px] text-white">Save</button>
-          </span>
-        </span>
-      )}
     </span>
   );
 }
@@ -339,10 +365,12 @@ export default function TablePage() {
   const [groupBy, setGroupBy] = useState("");
   const [hidden, setHidden] = useState<Col[]>(DEFAULT_HIDDEN);
   const [widths, setWidths] = useState<Record<string, number>>({});
+  /** Project whose saved layout is loaded; persistence waits for it so switching
+   *  projects never writes one project's columns under another's key. */
+  const [layoutFor, setLayoutFor] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [quickTitle, setQuickTitle] = useState("");
-  const [quickStatus, setQuickStatus] = useState("");
   const [bulkPatch, setBulkPatch] = useState("");
   const [bulkValue, setBulkValue] = useState("");
   const [views, setViews] = useState<{ id: string; name: string; config: Record<string, string> }[]>([]);
@@ -353,6 +381,19 @@ export default function TablePage() {
   // Live counting for running timers (item 5).
   const anyRunning = rows.some((t) => t.timerState === "running" || t.timerState === "overdue");
   const now = useTicker(anyRunning);
+
+  // Restore this project's saved table layout before paint…
+  useBeforePaint(() => {
+    const saved = readTableLayout(projectId);
+    if (saved.hidden) setHidden(saved.hidden);
+    if (saved.widths) setWidths(saved.widths);
+    setLayoutFor(projectId);
+  }, [projectId]);
+  // …then remember every change (hide/show a column, resize) for next time.
+  useEffect(() => {
+    if (layoutFor !== projectId) return;
+    writeTableLayout(projectId, hidden, widths);
+  }, [layoutFor, projectId, hidden, widths]);
 
   useEffect(() => {
     api<{ stories: { id: string; title: string }[] }>(`/api/projects/${projectId}/stories`)
@@ -394,7 +435,6 @@ export default function TablePage() {
         case "estHours": return t.estHours ?? -1;
         case "estDays": return t.estDays ?? -1;
         case "rdTime": return t.rdTime ?? -1;
-        case "loggedHours": return t.loggedHours ?? -1;
         case "status": return (lookups?.statuses ?? []).findIndex((s) => s.id === t.statusId);
         case "priority": return (lookups?.priorities ?? []).findIndex((p) => p.id === t.priorityId);
         case "assignee": return t.assignee?.name ?? "";
@@ -402,10 +442,9 @@ export default function TablePage() {
         case "type": return t.type?.name ?? "";
         case "epic": return t.epic?.name ?? "";
         case "story": return t.story?.title ?? "";
-        case "labels": return (t.labels ?? []).join(",");
         case "startDate": return t.startDate ?? "";
         case "endDate": return t.endDate ?? "";
-        case "dueAt": case "timerDue": return t.dueAt ?? "";
+        case "timerDue": return t.dueAt ?? "";
         case "timerStart": return t.startedAt ?? "";
         case "timerState": return t.timerState;
         case "timerActual": return t.timerWorkedMs ?? -1;
@@ -429,7 +468,7 @@ export default function TablePage() {
     const map = new Map<string, Task[]>();
     for (const t of sorted) {
       const name =
-        groupBy === "epic" ? (t.epic?.name ?? "(no epic)") :
+        groupBy === "epic" ? (t.epic?.name ?? "(no project name)") :
         groupBy === "assignee" ? (t.assignee?.name ?? "(unassigned)") :
         groupBy === "status" ? t.status.name : "";
       const arr = map.get(name) ?? [];
@@ -438,11 +477,6 @@ export default function TablePage() {
     }
     return [...map.entries()].map(([name, items]) => ({ name, items }));
   }, [sorted, groupBy]);
-
-  const allLabels = useMemo(
-    () => [...new Set(rows.flatMap((t) => (Array.isArray(t.labels) ? t.labels : [])))].sort(),
-    [rows],
-  );
 
   function toggleSort(key: string) {
     setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
@@ -459,6 +493,10 @@ export default function TablePage() {
 
   const m = lk.membership;
   const can = (a: string) => m.perms[a] === true || m.isSuperAdmin;
+  // Creation rule (change request): new tasks always start in To Do; the
+  // quick-add rows show that status but cannot change it.
+  const createStatusName =
+    (lk.statuses.find((s) => s.category === "todo") ?? lk.statuses[0])?.name ?? "To Do";
   const rule = (f: string) => (m.isSuperAdmin ? "editable" : (m.fieldRules[f] ?? "readonly"));
   const isManager = m.isSuperAdmin || m.perms.manage_workflow === true || m.perms.manage_archive === true;
   const canDeleteTask = m.perms.delete_task === true || m.isSuperAdmin;
@@ -472,7 +510,7 @@ export default function TablePage() {
 
   function colField(c: Col): string {
     if (c.startsWith("cf:")) return "custom";
-    return c === "key" || c === "timerStart" || c === "timerActual" || c === "loggedHours" || c === "createdAt" || c === "updatedAt"
+    return c === "key" || c === "timerStart" || c === "timerActual" || c === "createdAt" || c === "updatedAt"
       ? "title" : c === "timerDue" ? "dueAt" : c === "timerState" ? "title" : c;
   }
 
@@ -498,10 +536,9 @@ export default function TablePage() {
   async function quickAdd() {
     if (!quickTitle.trim()) return;
     try {
-      await createTask(projectId, {
-        title: quickTitle.trim(),
-        ...(quickStatus ? { statusId: quickStatus } : {}),
-      });
+      // Creation rule (change request): no statusId — the server always
+      // creates new tasks in the To Do status.
+      await createTask(projectId, { title: quickTitle.trim() });
       setQuickTitle("");
       setShowQuickAdd(false);
     } catch (e) {
@@ -573,17 +610,17 @@ export default function TablePage() {
   /** Memoized row: only the edited row re-renders (item 7 perf). */
   const TableRow = memo(function TableRow({ t }: { t: Task }) {
     return (
-      <tr className={t.status.category === "done" ? "task-row-done border-t dark:border-slate-800" : "border-t dark:border-slate-800"}
+      <tr className={`tt-row border-b border-line ${t.status.category === "done" ? "task-row-done" : ""}`}
         style={{ background: `${t.status.color}14` }}>
-        <td className="p-1"><input type="checkbox" checked={selected.has(t.id)}
+        <td className="w-8 px-2 py-1"><input type="checkbox" checked={selected.has(t.id)}
           onChange={(e) => setSelected((s) => { const n = new Set(s); if (e.target.checked) n.add(t.id); else n.delete(t.id); return n; })} /></td>
         {visible.map((c) => (
-          <td key={c} data-col={c} className="whitespace-nowrap p-1 align-top"
+          <td key={c} data-col={c} data-num={RIGHT_COLS.has(c) ? "1" : undefined} className="whitespace-nowrap px-2 py-1 align-middle"
             style={widths[c] ? { width: widths[c], minWidth: widths[c] } : undefined}>
             {cell(t, c)}
           </td>
         ))}
-        <td className="whitespace-nowrap p-1">
+        <td className="whitespace-nowrap px-2 py-1 text-right">
           <TaskMenu
             projectId={projectId}
             taskId={t.id}
@@ -591,8 +628,9 @@ export default function TablePage() {
             title={t.title}
             canRename={canManageRow(t)}
             canDelete={canDeleteTask}
+            variant="buttons"
             onChanged={() => refreshTasks(projectId)}
-            onDeleted={() => refreshTasks(projectId)}
+            onDeleted={() => { setMsg(`Deleted ${t.key} — it is gone from the board, calendar and reports.`); refreshTasks(projectId); }}
           />
         </td>
       </tr>
@@ -600,7 +638,7 @@ export default function TablePage() {
   });
 
   function cell(t: Task, c: Col) {
-    // Read-only computed/system columns are visibly marked (🔒).
+    // Read-only computed/system columns are visibly marked with a lock.
     if (RO_COLS.has(c)) {
       switch (c) {
         case "key":
@@ -609,13 +647,12 @@ export default function TablePage() {
               {t.key}
             </span>
           );
-        case "estDays": return <span className="text-slate-500" title="Computed from est. hours — read-only">{t.estDays ?? "—"} 🔒</span>;
-        case "loggedHours": return <span className="text-slate-500" title="Logged hours — read-only">{t.loggedHours ? `${t.loggedHours}h` : "—"} 🔒</span>;
-        case "timerStart": return <span className="text-slate-500" title={`First Start click — read-only`}>{fmtDateTime(t.startedAt)} 🔒</span>;
+        case "estDays": return <span className="text-slate-500" title="Computed from est. hours — read-only">{t.estDays ?? "—"}<LockMark /></span>;
+        case "timerStart": return <span className="text-slate-500" title="First Start click — read-only">{fmtDateTime(t.startedAt)}<LockMark /></span>;
         case "timerActual":
-          return <span className="text-slate-500" title="Total tracked time — read-only">{t.timerState === "not_started" ? "—" : fmtDur(t.timerWorkedMs)} 🔒</span>;
-        case "createdAt": return <span className="text-slate-500" title="Created — read-only">{new Date(t.createdAt).toLocaleDateString()} 🔒</span>;
-        case "updatedAt": return <span className="text-slate-500" title="Last updated — read-only">{new Date(t.updatedAt).toLocaleDateString()} 🔒</span>;
+          return <span className="text-slate-500" title="Total tracked time — read-only">{t.timerState === "not_started" ? "—" : fmtDur(t.timerWorkedMs)}<LockMark /></span>;
+        case "createdAt": return <span className="text-slate-500" title="Created — read-only">{new Date(t.createdAt).toLocaleDateString()}<LockMark /></span>;
+        case "updatedAt": return <span className="text-slate-500" title="Last updated — read-only">{new Date(t.updatedAt).toLocaleDateString()}<LockMark /></span>;
       }
     }
     switch (c) {
@@ -634,7 +671,7 @@ export default function TablePage() {
           : <span style={{ color: t.priority.color }}>● {t.priority.name}</span>;
       case "assignee":
         return can("assign") || can("edit_task_own")
-          ? <SelectCell col={c} value={t.assigneeId} options={lk.members.map((x) => ({ id: x.userId, name: memberLabel(x) }))}
+          ? <SelectCell col={c} value={t.assigneeId} options={lk.members.map((x) => ({ id: x.userId, name: userOptionLabel(x) }))}
               onCommit={(v) => commit(t, { assigneeId: v })}
               renderOption={(o) => o.name} />
           : (
@@ -645,7 +682,7 @@ export default function TablePage() {
           );
       case "testedBy":
         return rule("testedBy") === "editable"
-          ? <SelectCell col={c} value={t.testedById} options={lk.members.map((x) => ({ id: x.userId, name: memberLabel(x) }))}
+          ? <SelectCell col={c} value={t.testedById} options={lk.members.map((x) => ({ id: x.userId, name: userOptionLabel(x) }))}
               onCommit={(v) => commit(t, { testedById: v })} />
           : (t.testedBy?.name ?? "—");
       case "type":
@@ -661,11 +698,6 @@ export default function TablePage() {
           ? <SelectCell col={c} value={t.storyId} options={stories.map((s) => ({ id: s.id, name: s.title }))}
               onCommit={(v) => commit(t, { storyId: v })} />
           : (t.story?.title ?? "—");
-      case "labels":
-        return canManageRow(t) || can("edit_task_all")
-          ? <LabelsCell value={Array.isArray(t.labels) ? t.labels : []} allLabels={allLabels} col={c}
-              onCommit={(v) => commit(t, { labels: v })} />
-          : (Array.isArray(t.labels) ? t.labels.join(", ") : "—");
       case "estHours":
         return rule("estHours") === "editable"
           ? <NumberCell value={t.estHours} col={c} onCommit={(v) => commit(t, { estHours: v })} />
@@ -694,15 +726,15 @@ export default function TablePage() {
             {showStart && (
               <button onClick={() => void timerAction(projectId, t.id, "start").catch((e) => setMsg(e instanceof Error ? e.message : "Timer failed."))}
                 title="Start the timer for this stage"
-                className="rounded border border-blue-300 px-1 py-0.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950">
-                ▶ Start
+                className="inline-flex items-center gap-0.5 rounded border border-blue-300 px-1 py-0.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950">
+                <IconPlay className="h-2.5 w-2.5" /> Start
               </button>
             )}
             {showStop && (
               <button onClick={() => void timerAction(projectId, t.id, "stop").catch((e) => setMsg(e instanceof Error ? e.message : "Timer failed."))}
                 title="Stop the timer (work on this stage is done)"
-                className="rounded border border-red-300 px-1 py-0.5 text-[10px] font-semibold text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950">
-                ⏸ Stop
+                className="inline-flex items-center gap-0.5 rounded border border-red-300 px-1 py-0.5 text-[10px] font-semibold text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950">
+                <IconPause className="h-2.5 w-2.5" /> Stop
               </button>
             )}
           </span>
@@ -715,12 +747,12 @@ export default function TablePage() {
           const vis = f.roleVisibility?.[m.roleIds[0] ?? ""] ?? "editable";
           const cfVal = t.customValues?.[f.id];
           if (vis === "hidden") return null;
-          if (vis === "readonly") return <span className="text-slate-500" title="Read-only">{String(cfVal ?? "—")} 🔒</span>;
+          if (vis === "readonly") return <span className="text-slate-500" title="Read-only">{String(cfVal ?? "—")}<LockMark /></span>;
           const cfSet = (v: unknown) =>
             commit(t, { customValues: { ...(t.customValues ?? {}), [f.id]: v } });
           return (
             <CustomFieldCell fieldType={f.fieldType} options={f.options} value={cfVal}
-              members={lk.members.map((x) => ({ userId: x.userId, name: x.name }))} col={c}
+              members={lk.members.map((x) => ({ userId: x.userId, name: userOptionLabel(x) }))} col={c}
               onCommit={cfSet} />
           );
         }
@@ -730,126 +762,144 @@ export default function TablePage() {
 
   const headers: Record<BaseCol, string> = {
     key: "SL / Key", title: "Task title", status: "Status", assignee: "Assignee", priority: "Priority",
-    type: "Issue type", testedBy: "Tested By", dueAt: "Due", startDate: "Start", endDate: "End",
-    estHours: "Est. Hrs", estDays: "Est. Days", rdTime: "R&D Hrs", labels: "Labels",
-    epic: "Epic", story: "Parent story", description: "Description",
+    type: "Issue type", testedBy: "Tested By", startDate: "Start", endDate: "End",
+    estHours: "Est. Hrs", estDays: "Est. Days", rdTime: "R&D Hrs",
+    epic: "Project Name", story: "Parent story", description: "Description",
     timerStart: "Start time", timerDue: "Due time", timerState: "Timer", timerActual: "Total time",
-    loggedHours: "Logged", createdAt: "Created", updatedAt: "Updated",
+    createdAt: "Created", updatedAt: "Updated",
   };
   const headerOf = (c: Col) => c.startsWith("cf:")
     ? (lookups.customFields.find((f) => f.id === c.slice(3))?.name ?? "Custom")
     : headers[c as BaseCol];
 
+  // Change request (table export): the Excel download mirrors the current view,
+  // so the four active filters travel with it. No filters = the full project
+  // sheet, which is the file the import expects back.
+  const exportQuery = (() => {
+    const q = new URLSearchParams();
+    if (fSearch.trim()) q.set("q", fSearch.trim());
+    if (fAssignee) q.set("assignee", fAssignee);
+    if (fStatus) q.set("status", fStatus);
+    if (fEpic) q.set("epic", fEpic);
+    const s = q.toString();
+    return s ? `&${s}` : "";
+  })();
+
   return (
     <div>
-      <div className="mb-2 flex flex-wrap items-center gap-1 text-xs">
+      <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
         <input id="table-search" value={fSearch} onChange={(e) => setFSearch(e.target.value)} placeholder="Search tasks… ( / to focus )"
-          className="rounded border p-1 dark:border-slate-700 dark:bg-slate-800" />
-        <select value={fAssignee} onChange={(e) => setFAssignee(e.target.value)} className="max-w-56 rounded border p-1 dark:border-slate-700 dark:bg-slate-800">
+          className={`${fieldCls} w-56`} />
+        <select value={fAssignee} onChange={(e) => setFAssignee(e.target.value)} className={`${fieldCls} max-w-56`}>
           <option value="">All assignees</option>
-          {lookups.members.map((x) => <option key={x.userId} value={x.userId}>{memberLabel(x)}</option>)}
+          {lookups.members.map((x) => <option key={x.userId} value={x.userId}>{userOptionLabel(x)}</option>)}
         </select>
-        <select value={fStatus} onChange={(e) => setFStatus(e.target.value)} className="rounded border p-1 dark:border-slate-700 dark:bg-slate-800">
+        <select value={fStatus} onChange={(e) => setFStatus(e.target.value)} className={fieldCls}>
           <option value="">All statuses</option>
           {lookups.statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
-        <select value={fEpic} onChange={(e) => setFEpic(e.target.value)} className="rounded border p-1 dark:border-slate-700 dark:bg-slate-800">
-          <option value="">All epics</option>
+        <select value={fEpic} onChange={(e) => setFEpic(e.target.value)} className={fieldCls}>
+          <option value="">All project names</option>
           {lookups.epics.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
-        <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className="rounded border p-1 dark:border-slate-700 dark:bg-slate-800">
+        <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className={fieldCls}>
           <option value="">No grouping</option>
-          <option value="epic">Group: Epic</option>
+          <option value="epic">Group: Project Name</option>
           <option value="assignee">Group: Assignee</option>
           <option value="status">Group: Status</option>
         </select>
         <select
           value="" onChange={(e) => { if (e.target.value) setHidden((h) => h.includes(e.target.value as Col) ? h : [...h, e.target.value as Col]); }}
-          className="rounded border p-1 dark:border-slate-700 dark:bg-slate-800">
+          className={fieldCls}>
           <option value="">Hide column…</option>
           {visible.map((c) => <option key={c} value={c}>{headerOf(c)}</option>)}
         </select>
         <select
           value="" onChange={(e) => { if (e.target.value) setHidden((h) => h.filter((c) => c !== e.target.value as Col)); }}
-          className="rounded border p-1 dark:border-slate-700 dark:bg-slate-800">
+          className={fieldCls}>
           <option value="">Show column…</option>
           {hidden.map((c) => <option key={c} value={c}>{headerOf(c)}</option>)}
         </select>
-        {hidden.length > 0 && <button onClick={() => setHidden([])} className="rounded border px-1">Show all</button>}
+        {hidden.length > 0 && <button onClick={() => setHidden([])} className="tt-btn">Show all</button>}
       </div>
 
-      <div className="mb-2 flex flex-wrap items-center gap-1 text-xs">
+      <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
         {can("create_task") && (
           showQuickAdd ? (
-            <span className="flex gap-1">
+            <span className="flex items-center gap-1.5">
               <input value={quickTitle} onChange={(e) => setQuickTitle(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && quickAdd()}
                 placeholder="New task title…" autoFocus
-                className="rounded border p-1 dark:border-slate-700 dark:bg-slate-800" />
-              <select value={quickStatus} onChange={(e) => setQuickStatus(e.target.value)} className="rounded border p-1 dark:border-slate-700 dark:bg-slate-800">
-                <option value="">(default status)</option>
-                {lookups.statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-              <button onClick={quickAdd} className="rounded bg-indigo-600 px-2 font-semibold text-white">Add</button>
-              <button onClick={() => setShowQuickAdd(false)} className="rounded border px-2">Cancel</button>
+                className={`${fieldCls} w-64`} />
+              <span className="flex h-8 items-center gap-1 rounded-md border border-transparent px-2 text-muted" title="New tasks always start in the To Do status">
+                → {createStatusName}
+              </span>
+              <button onClick={quickAdd} className="tt-btn-primary tt-btn-sm">Add</button>
+              <button onClick={() => setShowQuickAdd(false)} className="tt-btn">Cancel</button>
             </span>
           ) : (
-            <button onClick={() => setShowQuickAdd(true)} className="rounded bg-indigo-600 px-2 py-1 font-semibold text-white">+ Quick add</button>
+            <button onClick={() => setShowQuickAdd(true)} className="tt-btn-primary tt-btn-sm">
+              <IconPlus className="h-3.5 w-3.5" /> Quick add
+            </button>
           )
         )}
         {can("export") && (
-          <>
-            <a href={`/api/projects/${projectId}/export?format=csv`} className="rounded border px-2 py-1">⬇ CSV</a>
-            <a href={`/api/projects/${projectId}/export?format=xlsx`} className="rounded border px-2 py-1">⬇ XLSX</a>
-          </>
+          <a
+            href={`/api/projects/${projectId}/export?format=xlsx${exportQuery}`}
+            className="tt-btn"
+            title="Download these tasks as a real Excel workbook (.xlsx)"
+          >
+            <IconDownload className="h-3.5 w-3.5" /> Download Excel
+          </a>
         )}
         {can("import") && (
-          <label className="cursor-pointer rounded border px-2 py-1">⬆ Import
+          <label className="tt-btn cursor-pointer">
+            <IconUpload className="h-3.5 w-3.5" /> Import
             <input type="file" accept=".csv,.xlsx,.xls" className="hidden"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) doImport(f); e.target.value = ""; }} />
           </label>
         )}
-        <span className="ml-auto text-slate-500">
+        <span className="ml-auto text-muted">
           {loading ? "Loading…" : `${rows.length} task(s)`}{msg && ` · ${msg}`}{error && ` · ${error}`}
         </span>
       </div>
 
       {selected.size > 0 && (
-        <div className="mb-2 flex items-center gap-1 rounded bg-indigo-50 p-1 text-xs dark:bg-indigo-950">
-          {selected.size} selected
-          <select value={bulkPatch} onChange={(e) => setBulkPatch(e.target.value)} className="rounded border p-1 dark:border-slate-700 dark:bg-slate-800">
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-md bg-indigo-50 p-1.5 text-xs dark:bg-indigo-950">
+          <span className="font-medium">{selected.size} selected</span>
+          <select value={bulkPatch} onChange={(e) => setBulkPatch(e.target.value)} className={fieldCls}>
             <option value="">Set field…</option>
             <option value="statusId">Status</option>
             <option value="priorityId">Priority</option>
             <option value="assigneeId">Assignee</option>
           </select>
           {bulkPatch === "statusId" && (
-            <select value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} className="rounded border p-1 dark:bg-slate-800">
+            <select value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} className={fieldCls}>
               <option value="">…</option>
               {lookups.statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           )}
           {bulkPatch === "priorityId" && (
-            <select value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} className="rounded border p-1 dark:bg-slate-800">
+            <select value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} className={fieldCls}>
               <option value="">…</option>
               {lookups.priorities.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           )}
           {bulkPatch === "assigneeId" && (
-            <select value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} className="rounded border p-1 dark:bg-slate-800">
+            <select value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} className={fieldCls}>
               <option value="">…</option>
               <option value="none">(unassigned)</option>
-              {lookups.members.map((x) => <option key={x.userId} value={x.userId}>{memberLabel(x)}</option>)}
+              {lookups.members.map((x) => <option key={x.userId} value={x.userId}>{userOptionLabel(x)}</option>)}
             </select>
           )}
-          <button onClick={applyBulk} className="rounded bg-indigo-600 px-2 py-0.5 font-semibold text-white">Apply</button>
-          <button onClick={() => setSelected(new Set())} className="rounded border px-2 py-0.5">Clear</button>
+          <button onClick={applyBulk} className="tt-btn-primary tt-btn-sm">Apply</button>
+          <button onClick={() => setSelected(new Set())} className="tt-btn">Clear</button>
         </div>
       )}
 
-      <div className="mb-2 flex items-center gap-1 text-xs">
+      <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
         <input value={viewName} onChange={(e) => setViewName(e.target.value)} placeholder="Save current filters as…"
-          className="rounded border p-1 dark:border-slate-700 dark:bg-slate-800" />
+          className={`${fieldCls} w-56`} />
         <button
           onClick={async () => {
             if (!viewName.trim()) return;
@@ -860,78 +910,66 @@ export default function TablePage() {
             setViewName("");
             api<{ views: { id: string; name: string; config: Record<string, string> }[] }>(`/api/projects/${projectId}/views?scope=table`).then((d) => setViews(d.views));
           }}
-          className="rounded border px-2 py-0.5">Save view</button>
+          className="tt-btn">Save view</button>
         {views.map((v) => (
           <button key={v.id}
             onClick={() => {
               setFSearch(v.config.fSearch ?? "");
               setFAssignee(v.config.fAssignee ?? ""); setFStatus(v.config.fStatus ?? ""); setFEpic(v.config.fEpic ?? "");
             }}
-            className="rounded border px-2 py-0.5">📌 {v.name}</button>
+            className="tt-btn" title={`Apply saved view “${v.name}”`}>{v.name}</button>
         ))}
       </div>
 
-      <div className="overflow-auto rounded border bg-white text-xs dark:border-slate-800 dark:bg-slate-900">
-        <table className="w-full border-collapse">
-          <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800">
-            <tr>
-              <th className="p-1"><input type="checkbox"
-                checked={sorted.length > 0 && sorted.every((t) => selected.has(t.id))}
-                onChange={(e) => setSelected(e.target.checked ? new Set(sorted.map((t) => t.id)) : new Set())} /></th>
-              {visible.map((c) => (
-                <th key={c}
-                  onClick={() => toggleSort(c)}
-                  className="group cursor-pointer whitespace-nowrap p-1 text-left hover:underline"
-                  style={widths[c] ? { width: widths[c], minWidth: widths[c] } : undefined}>
-                  {headerOf(c)}{sort.key === c ? (sort.dir === 1 ? " ▲" : " ▼") : ""}
-                  {RO_COLS.has(c) && <span title="Read-only column"> 🔒</span>}
-                  <span
-                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize(c, e); }}
-                    onClick={(e) => e.stopPropagation()}
-                    title="Drag to resize"
-                    className="ml-1 inline-block h-3 w-1 cursor-col-resize align-middle text-slate-300 hover:text-slate-600 dark:text-slate-600 dark:hover:text-slate-300"
-                  >|</span>
+      <div className="tt-card overflow-hidden">
+        <div className="max-h-[70vh] overflow-auto">
+          <table className="tt-table text-xs">
+            <thead>
+              <tr>
+                <th className="sticky top-0 z-10 w-8 border-b border-line bg-surface px-2 py-1.5">
+                  <input type="checkbox"
+                    checked={sorted.length > 0 && sorted.every((t) => selected.has(t.id))}
+                    onChange={(e) => setSelected(e.target.checked ? new Set(sorted.map((t) => t.id)) : new Set())} />
                 </th>
-              ))}
-              <th className="p-1 text-left">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {grouped.map((g, gi) => (
-              <Fragment key={g.name || `all-${gi}`}>
-                {g.name && <tr key={"g" + g.name}><td colSpan={visible.length + 2} className="bg-slate-100 p-1 font-semibold dark:bg-slate-800">{g.name} ({g.items.length})</td></tr>}
-                {g.items.map((t) => <TableRow key={t.id} t={t} />)}
-              </Fragment>
-            ))}
-            {/* Quick "+ New task" row at the bottom of the table. */}
-            {can("create_task") && (
-              <tr className="border-t border-dashed dark:border-slate-800">
-                <td className="p-1">＋</td>
-                <td colSpan={visible.length} className="p-1">
-                  <span className="flex items-center gap-1">
-                    <input value={quickTitle} onChange={(e) => setQuickTitle(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") void quickAdd(); }}
-                      placeholder="New task title… (Enter to add)"
-                      className="w-full max-w-md rounded border border-transparent bg-transparent p-0.5 hover:border-slate-300 dark:hover:border-slate-600" />
-                    <select value={quickStatus} onChange={(e) => setQuickStatus(e.target.value)}
-                      className="rounded border border-transparent bg-transparent p-0.5 hover:border-slate-300 dark:hover:border-slate-600">
-                      <option value="">(default status)</option>
-                      {lookups.statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                    <button onClick={() => void quickAdd()} disabled={!quickTitle.trim()}
-                      className="rounded bg-indigo-600 px-2 py-0.5 text-[11px] font-semibold text-white disabled:opacity-50">
-                      Add
-                    </button>
-                  </span>
-                </td>
-                <td />
+                {visible.map((c) => (
+                  <th key={c}
+                    onClick={() => toggleSort(c)}
+                    data-num={RIGHT_COLS.has(c) ? "1" : undefined}
+                    className="group sticky top-0 z-10 cursor-pointer whitespace-nowrap border-b border-line bg-surface px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted hover:bg-line/40"
+                    style={widths[c] ? { width: widths[c], minWidth: widths[c] } : undefined}>
+                    {headerOf(c)}{sort.key === c ? (sort.dir === 1 ? " ▲" : " ▼") : ""}
+                    {RO_COLS.has(c) && <span className="ml-1 inline-flex align-middle text-slate-400" title="Read-only column"><IconLock className="h-3 w-3" /></span>}
+                    <span
+                      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize(c, e); }}
+                      onClick={(e) => e.stopPropagation()}
+                      title="Drag to resize"
+                      className="ml-1 inline-block h-3 w-1 cursor-col-resize align-middle text-slate-300 hover:text-slate-600 dark:text-slate-600 dark:hover:text-slate-300"
+                    >|</span>
+                  </th>
+                ))}
+                <th className="sticky top-0 z-10 whitespace-nowrap border-b border-line bg-surface px-2 py-1.5 text-right text-[11px] font-semibold uppercase tracking-wide text-muted">Actions</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {grouped.map((g, gi) => (
+                <Fragment key={g.name || `all-${gi}`}>
+                  {g.name && (
+                    <tr key={"g" + g.name}>
+                      <td colSpan={visible.length + 2} className="border-b border-line bg-line/40 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                        {g.name}
+                        <span className="ml-1.5 rounded-full bg-surface px-1.5 py-0.5 text-[10px] font-medium tabular-nums">{g.items.length}</span>
+                      </td>
+                    </tr>
+                  )}
+                  {g.items.map((t) => <TableRow key={t.id} t={t} />)}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
-      <p className="mt-1 text-xs text-slate-500">
-        Click a key to open details. Row colour = status, ● = priority, 🔒 = read-only.
+      <p className="mt-2 text-[11px] text-muted">
+        Click a key to open details. Row colour = status, ● = priority, <IconLock className="inline h-3 w-3 align-text-bottom" /> = read-only.
         Edits save on blur/Enter, cancel on Esc, and sync to the board, timeline and drawer instantly.
       </p>
 

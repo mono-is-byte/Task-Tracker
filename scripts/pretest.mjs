@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 
 // Applies the committed Prisma migration SQL to scratch test databases.
 // Only touches files under ./tests/ — never the dev database.
-const TEST_DBS = ["tests/test-auth.db", "tests/test-tasks.db", "tests/test-projects.db", "tests/test-calendar.db", "tests/test-timer.db", "tests/test-users.db", "tests/test-holidays.db"];
+const TEST_DBS = ["tests/test-auth.db", "tests/test-tasks.db", "tests/test-projects.db", "tests/test-calendar.db", "tests/test-timer.db", "tests/test-users.db", "tests/test-holidays.db", "tests/test-lookups.db"];
 
 const migrationDir = "./prisma/migrations";
 const migrationSql = readdirSync(migrationDir)

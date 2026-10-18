@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { api } from "@/lib/client";
 import { useLive, useProject } from "@/hooks/useProject";
 import TaskDrawer from "@/components/TaskDrawer";
+import { IconClock } from "@/components/icons";
 
 interface Task {
   id: string; key: string; title: string;
@@ -73,9 +74,14 @@ export default function ArchivePage() {
             style={{ background: `${t.status.color}14` }}>
             <span className="font-mono text-xs text-slate-500">{t.key}</span>
             <button onClick={() => setDrawerId(t.id)} className="flex-1 truncate text-left hover:underline">{t.title}</button>
-            <span className="text-xs text-slate-500">
-              {t.storyPoints != null ? `◈${t.storyPoints} ` : ""}{t.estHours != null ? `⏱${t.estHours}h ` : ""}
-              {t.assignee?.name ?? ""} {t.endDate ? `· done ${t.endDate.slice(0, 10)}` : ""}
+            <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+              {t.storyPoints != null && <span title="Story points">{t.storyPoints} SP</span>}
+              {t.estHours != null && (
+                <span className="inline-flex items-center gap-0.5" title="Estimated hours">
+                  <IconClock className="h-3 w-3" /> {t.estHours}h
+                </span>
+              )}
+              <span>{t.assignee?.name ?? ""} {t.endDate ? `· done ${t.endDate.slice(0, 10)}` : ""}</span>
             </span>
             {canArchive && <button onClick={() => reopen(t.id)} className="rounded border px-1 text-xs">Re-open</button>}
           </li>

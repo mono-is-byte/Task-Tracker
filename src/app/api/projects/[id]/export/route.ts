@@ -1,4 +1,4 @@
-import { fail, ok, requireMember } from "@/lib/api";
+import { fail, requireMember } from "@/lib/api";
 import { db, taskKey } from "@/lib/db";
 import { loadProject } from "@/lib/server";
 import { TASK_CSV_COLUMNS, estDays } from "@/lib/domain";
@@ -9,6 +9,12 @@ function fmtDate(d: Date | null | undefined): string {
   return new Date(d).toISOString().slice(0, 10);
 }
 
+/**
+ * Table download — change request: Excel only (the CSV option is gone). The
+ * workbook keeps the project's canonical task sheet (the file the import
+ * expects back) and honours the table's active filters so a filtered view
+ * exports exactly what is on screen.
+ */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const auth = await requireMember(req, id, "export");
@@ -16,7 +22,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const loaded = await loadProject(id, auth.user.id, auth.user.isSuperAdmin);
   if (!loaded) return fail(404, "not_found", "Project not found.");
   const url = new URL(req.url);
-  const format = (url.searchParams.get("format") ?? "csv").toLowerCase();
+  const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+  const fAssignee = url.searchParams.get("assignee") ?? "";
+  const fStatus = url.searchParams.get("status") ?? "";
+  const fEpic = url.searchParams.get("epic") ?? "";
 
   const full = await db.task.findMany({
     where: { projectId: id },
@@ -31,8 +40,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   });
   const keyOf = (serial: number) => taskKey(loaded.project.key, serial);
   const byId = new Map(full.map((t) => [t.id, t]));
+  // Same filter semantics as the table page's view filters.
+  const filtered = full.filter((t) => {
+    if (q && !`${keyOf(t.serial)} ${t.title}`.toLowerCase().includes(q)) return false;
+    if (fAssignee && (t.assigneeId ?? "") !== fAssignee) return false;
+    if (fStatus && t.statusId !== fStatus) return false;
+    if (fEpic && (t.epicId ?? "") !== fEpic) return false;
+    return true;
+  });
 
-  const rows: Record<string, string | number>[] = full.map((t) => ({
+  const rows: Record<string, string | number>[] = filtered.map((t) => ({
     SL: t.serial,
     Epic: t.epic?.name ?? "",
     "User Story": t.story?.title ?? "",
@@ -68,26 +85,21 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     fbByTask.set(f.taskId, arr);
   }
   for (let i = 0; i < rows.length; i++) {
-    rows[i].Feedback = (fbByTask.get(full[i].id) ?? []).join("\n---\n");
+    rows[i].Feedback = (fbByTask.get(filtered[i].id) ?? []).join("\n---\n");
   }
 
   const ws = XLSX.utils.json_to_sheet(rows, { header: [...TASK_CSV_COLUMNS] });
+  // Readable default widths so long titles/descriptions do not hide in cells.
+  ws["!cols"] = TASK_CSV_COLUMNS.map((c) => ({
+    wch: c === "Task title" || c === "Description" ? 42 : c === "Remarks" || c === "Feedback" ? 32 : Math.max(10, c.length + 2),
+  }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Tasks");
-  if (format === "xlsx") {
-    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
-    return new Response(buf as unknown as BodyInit, {
-      headers: {
-        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="${loaded.project.key}-tasks.xlsx"`,
-      },
-    });
-  }
-  const csv = XLSX.utils.sheet_to_csv(ws);
-  return new Response(csv, {
+  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+  return new Response(buf as unknown as BodyInit, {
     headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${loaded.project.key}-tasks.csv"`,
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="${loaded.project.key}-tasks.xlsx"`,
     },
   });
 }

@@ -11,7 +11,11 @@ import { deriveTimerState } from "./timerState";
 
 export interface DashboardSummary {
   projectCount: number;
-  totals: { all: number; open: number; done: number; overdue: number };
+  /** all = every task; open = not done; done = final category; pending = "todo"
+   *  category; inProgress = "inprogress" category; overdue = open past its due date. */
+  totals: { all: number; open: number; done: number; pending: number; inProgress: number; overdue: number };
+  /** done / all, rounded to a whole percent (0 when there are no tasks). */
+  completionPct: number;
   myOpen: number;
   myOverdue: number;
   /** Tasks whose timer is running right now (incl. lazily auto-started). */
@@ -27,13 +31,17 @@ export async function dashboardSummary(
   client: PrismaClient,
   userId: string,
   isSuperAdmin: boolean,
+  projectId?: string,
 ): Promise<DashboardSummary> {
-  const projects = isSuperAdmin
+  const allProjects = isSuperAdmin
     ? await client.project.findMany({ select: { id: true, key: true, name: true, isHidden: true } })
     : (await client.projectMember.findMany({
         where: { userId },
         include: { project: { select: { id: true, key: true, name: true, isHidden: true } } },
       })).map((m) => m.project);
+  // Change request: the Dashboard's single project-wise filter scopes the whole
+  // summary to ONE project; the caller validates the id against the viewer first.
+  const projects = projectId ? allProjects.filter((p) => p.id === projectId) : allProjects;
   const projectIds = projects.map((p) => p.id);
 
   const tasks = projectIds.length === 0 ? [] : await client.task.findMany({
@@ -51,7 +59,7 @@ export async function dashboardSummary(
   const isOverdue = (endDate: Date | null, category: string) =>
     !isDone(category) && endDate != null && dayKey(endDate) < today;
 
-  const totals = { all: tasks.length, open: 0, done: 0, overdue: 0 };
+  const totals = { all: tasks.length, open: 0, done: 0, pending: 0, inProgress: 0, overdue: 0 };
   // statuses are per-project — merge same-named ones for a cross-project overview
   const byStatusMap = new Map<string, { id: string; name: string; color: string; count: number }>();
   const byPriorityMap = new Map<string, { name: string; color: string; count: number }>();
@@ -67,6 +75,8 @@ export async function dashboardSummary(
     if (done) totals.done += 1;
     else {
       totals.open += 1;
+      if (t.status.category === "inprogress") totals.inProgress += 1;
+      else if (t.status.category === "todo") totals.pending += 1;
       if (isOverdue(t.endDate, t.status.category)) totals.overdue += 1;
     }
     if (t.assigneeId === userId && !done) {
@@ -98,6 +108,7 @@ export async function dashboardSummary(
   return {
     projectCount: projects.filter((p) => !p.isHidden).length,
     totals,
+    completionPct: totals.all === 0 ? 0 : Math.round((totals.done / totals.all) * 100),
     myOpen,
     myOverdue,
     runningNow,
@@ -106,4 +117,46 @@ export async function dashboardSummary(
     byPriority: [...byPriorityMap.values()].sort((a, b) => b.count - a.count),
     perMember: [...perMemberMap.values()].sort((a, b) => b.count - a.count),
   };
+}
+
+/**
+ * Change request (dashboard PDF/Excel exports): the four task/activity lists
+ * the Dashboard renders. Extracted so the page and the export route read the
+ * exact same data with one implementation (no drift between screen and file).
+ * `projectIds` is the already-validated scope (all projects, or the single
+ * project-wise-filter id).
+ */
+export async function dashboardLists(client: PrismaClient, userId: string, projectIds: string[]) {
+  const [assigned, qaQueue, overdue, recent] = await Promise.all([
+    client.task.findMany({
+      where: { projectId: { in: projectIds }, assigneeId: userId, status: { category: { not: "done" } } },
+      include: { status: true, priority: true, project: true },
+      orderBy: [{ endDate: "asc" }, { updatedAt: "desc" }],
+      take: 20,
+    }),
+    client.task.findMany({
+      where: { projectId: { in: projectIds }, testedById: userId, status: { name: "In Testing" } },
+      include: { status: true, priority: true, project: true },
+      orderBy: { updatedAt: "desc" },
+      take: 20,
+    }),
+    client.task.findMany({
+      where: {
+        projectId: { in: projectIds },
+        OR: [{ assigneeId: userId }, { testedById: userId }],
+        endDate: { lt: new Date() },
+        status: { category: { not: "done" } },
+      },
+      include: { status: true, priority: true, project: true },
+      orderBy: { endDate: "asc" },
+      take: 20,
+    }),
+    client.activity.findMany({
+      where: { task: { projectId: { in: projectIds } } },
+      include: { task: { include: { project: true } }, actor: { select: { name: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+    }),
+  ]);
+  return { assigned, qaQueue, overdue, recent };
 }

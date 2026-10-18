@@ -59,11 +59,29 @@ describe("capacity", () => {
     ).toBe(4);
     expect(workingDaysBetween(new Date("2026-10-11"), new Date("2026-10-05"), [1, 2, 3, 4, 5])).toBe(0);
   });
+
+  it("working-day exceptions count as working days, even on weekends and holidays", () => {
+    // Fri 2026-10-09 + Sat 2026-10-10 are outside the Mon-Fri working set…
+    expect(workingDaysBetween(new Date("2026-10-09"), new Date("2026-10-10"), [0, 1, 2, 3, 4])).toBe(0);
+    // …until an explicit exception opens the office on the Friday.
+    expect(
+      workingDaysBetween(new Date("2026-10-09"), new Date("2026-10-10"), [0, 1, 2, 3, 4], [], ["2026-10-09"]),
+    ).toBe(1);
+    // An exception also wins over a configured holiday on a normal working day.
+    expect(
+      workingDaysBetween(new Date("2026-10-05"), new Date("2026-10-11"), [1, 2, 3, 4, 5], ["2026-10-06"], ["2026-10-06"]),
+    ).toBe(5);
+  });
+
   it("computes team capacity from per-member rates", () => {
     // 2 members x 8h x 5 days
     expect(computeCapacity([8, 8], new Date("2026-10-05"), new Date("2026-10-11"), [1, 2, 3, 4, 5])).toBe(80);
     // mixed rates (per-user override) with a holiday
     expect(computeCapacity([8, 6], new Date("2026-10-05"), new Date("2026-10-11"), [1, 2, 3, 4, 5], ["2026-10-06"])).toBe(56);
+    // the same holiday is worked (office open) → full capacity again
+    expect(
+      computeCapacity([8, 6], new Date("2026-10-05"), new Date("2026-10-11"), [1, 2, 3, 4, 5], ["2026-10-06"], ["2026-10-06"]),
+    ).toBe(70);
   });
   it("warns when planned exceeds capacity", () => {
     const r = capacityReport([{ estHours: 50, storyPoints: 8 }, { estHours: 40 }], 80);

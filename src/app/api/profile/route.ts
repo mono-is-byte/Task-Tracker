@@ -8,7 +8,6 @@ const Body = z.object({
   theme: z.enum(["system", "light", "dark"]).optional(),
   hoursPerDay: z.number().min(1).max(24).nullable().optional(),
   avatarUrl: z.string().max(500).nullable().optional(),
-  notifyPrefs: z.record(z.string(), z.boolean()).optional(),
 });
 
 export async function PATCH(req: Request) {
@@ -23,7 +22,6 @@ export async function PATCH(req: Request) {
   if (parsed.data.theme !== undefined) data.theme = parsed.data.theme;
   if (parsed.data.hoursPerDay !== undefined) data.hoursPerDay = parsed.data.hoursPerDay;
   if (parsed.data.avatarUrl !== undefined) data.avatarUrl = parsed.data.avatarUrl;
-  if (parsed.data.notifyPrefs !== undefined) data.notifyPrefs = JSON.stringify(parsed.data.notifyPrefs);
   const user = await db.user.update({ where: { id: auth.user.id }, data });
   await audit(db, { actorId: auth.user.id, action: "user.profile_update", entity: "user", entityId: user.id, ip: clientIp(req) });
   return ok({ user: { id: user.id, name: user.name, theme: user.theme, hoursPerDay: user.hoursPerDay } });

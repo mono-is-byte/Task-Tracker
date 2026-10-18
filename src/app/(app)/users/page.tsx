@@ -5,6 +5,7 @@ import Link from "next/link";
 import { api } from "@/lib/client";
 import Avatar from "@/components/Avatar";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import { IconPlus } from "@/components/icons";
 
 /**
  * The dedicated Users page (sidebar entry, visible to Admins and PMs only).
@@ -194,8 +195,8 @@ export default function UsersPage() {
             : "You can edit the name and designation of users in the projects you manage."}
         </p>
         {isAdmin && (
-          <button onClick={() => setShowAdd((v) => !v)} className="ml-auto rounded bg-indigo-600 px-3 py-1 text-sm font-semibold text-white">
-            + Add user
+          <button onClick={() => setShowAdd((v) => !v)} className="ml-auto inline-flex items-center gap-1 rounded bg-indigo-600 px-3 py-1 text-sm font-semibold text-white">
+            <IconPlus className="h-4 w-4" /> Add user
           </button>
         )}
       </div>
@@ -221,7 +222,7 @@ export default function UsersPage() {
               className={`${inp} mt-1 block`}
             >
               <option value="">
-                {roles.length === 0 ? "— no roles yet —" : "— no designation —"}
+                {roles.length === 0 ? "No roles yet" : "No designation"}
               </option>
               {roles.map((r) => (
                 <option key={r.id} value={r.id}>{r.name}</option>
@@ -250,14 +251,21 @@ export default function UsersPage() {
                   <div className="flex items-center gap-2">
                     <Avatar name={u.name} url={u.avatarUrl} size={32} />
                     <div className="min-w-0">
-                      <div className="flex items-center gap-1 font-semibold">
-                        <span className="truncate">{u.name}</span>
+                      {/* The app-wide label format: "Name - Designation". */}
+                      <div
+                        className="truncate font-semibold"
+                        title={u.designationName ? `${u.name} - ${u.designationName}` : u.name}
+                      >
+                        {u.name}{" "}
+                        <span className="font-normal text-muted">- {u.designationName ?? "No designation"}</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1 text-xs text-slate-500">
                         {u.isSuperAdmin && <span className="rounded bg-purple-100 px-1 text-[10px] dark:bg-purple-950">admin</span>}
                         {u.mustChangePassword && <span className="rounded bg-amber-100 px-1 text-[10px] dark:bg-amber-950">temp-pw</span>}
                         {!u.active && <span className="rounded bg-red-100 px-1 text-[10px] dark:bg-red-950">inactive</span>}
                         {u.lockedUntil && new Date(u.lockedUntil) > new Date() && <span className="rounded bg-red-100 px-1 text-[10px] dark:bg-red-950">locked</span>}
+                        <span className="truncate">{u.email} · @{u.username}</span>
                       </div>
-                      <div className="truncate text-xs text-slate-500">{u.email} · @{u.username}</div>
                     </div>
                   </div>
                 </td>
@@ -268,10 +276,11 @@ export default function UsersPage() {
                       defaultValue={u.designation ?? ""}
                       disabled={busy === u.id + "des" || roles.length === 0}
                       className={`${inp} w-40`}
-                      title="Designation = a role from Roles & Permissions (label only)"
+                      aria-label={`Designation for ${u.name}`}
+                      title="Set the user's designation = a role from Roles & Permissions (label only)"
                       onChange={(e) => void saveDesignation(u, e.target.value)}
                     >
-                      <option value="">— no designation —</option>
+                      <option value="">No designation</option>
                       {u.designation && !roles.some((r) => r.id === u.designation) && (
                         <option value={u.designation}>(deleted role)</option>
                       )}
@@ -280,7 +289,7 @@ export default function UsersPage() {
                       ))}
                     </select>
                   ) : (
-                    <span className="text-xs text-slate-500" title={u.designationName ?? ""}>{u.designationName ?? "—"}</span>
+                    <span className="text-xs text-muted" title={u.designationName ?? ""}>{u.designationName ?? "No designation"}</span>
                   )}
                 </td>
                 <td className="p-2">

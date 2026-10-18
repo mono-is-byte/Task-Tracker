@@ -1,10 +1,28 @@
+# Dependencies
 node_modules/
+
+# Next.js build output
 .next/
 out/
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Next.js generated type declarations (managed by Next.js — do not commit)
+next-env.d.ts
+
+# Local SQLite databases and their journals
 *.db
 *.db-journal
-prisma/migrations/migration_lock.toml
-.env
+*.db-wal
+*.db-shm
+
+# Environment files (the template is committed on purpose)
+.env*
 !.env.example
+
+# Test coverage
 coverage/
+
+# User-uploaded files
 public/uploads/

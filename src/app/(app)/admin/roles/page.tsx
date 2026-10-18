@@ -9,7 +9,8 @@ interface Role {
   permissions: Record<string, boolean>;
   fieldRules: Record<string, string>;
   isSystem: boolean;
-  members: number;
+  /** Unique, non-deleted users whose designation is this role (server-computed). */
+  users: number;
 }
 
 export default function AdminRolesPage() {
@@ -80,7 +81,12 @@ export default function AdminRolesPage() {
             <div className="flex items-center gap-2">
               <strong>{r.name}</strong>
               {r.isSystem && <span className="rounded bg-slate-200 px-1 text-xs dark:bg-slate-700">system</span>}
-              <span className="text-xs text-slate-500">{r.members} member(s)</span>
+              <span
+                className="rounded bg-line/60 px-1.5 py-0.5 text-xs text-muted"
+                title={`${r.users} unique user${r.users === 1 ? "" : "s"} with this designation (set on the Users page)`}
+              >
+                {r.users} user{r.users === 1 ? "" : "s"}
+              </span>
               <button onClick={() => setEditing(r)} className="ml-auto rounded border px-2 py-0.5 text-xs">Edit</button>
             </div>
             <p className="text-xs text-slate-500">{r.description}</p>

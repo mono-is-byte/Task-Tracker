@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { suggestedForStatus } from "@/lib/workflow";
-import { memberLabel } from "@/lib/memberLabel";
+import { userOptionLabel } from "@/lib/memberLabel";
 import Avatar from "@/components/Avatar";
 import type { Lookups } from "@/hooks/useProject";
 
@@ -30,7 +30,7 @@ export default function AssignStepDialog({ lookups, statusId, currentAssigneeId,
   );
 
   const row = (m: Lookups["members"][number], isSuggested: boolean) => {
-    const label = memberLabel(m);
+    const label = userOptionLabel(m);
     return (
       <button
         key={m.userId}
@@ -69,18 +69,18 @@ export default function AssignStepDialog({ lookups, statusId, currentAssigneeId,
         </h4>
         <p className="mb-3 text-xs text-slate-500">
           {suggested.length > 0
-            ? "Members whose designation matches this status's suggestion list are shown first."
-            : "Pick a member, or skip to move the task without changing its assignee."}
+            ? "Users whose designation matches this status's suggestion list are shown first."
+            : "Pick a user, or skip to move the task without changing its assignee."}
         </p>
 
         <div className="mb-2 max-h-60 space-y-1 overflow-auto">
           {suggested.map((m) => row(m, true))}
           {others.length > 0 && suggested.length > 0 && (
-            <p className="pt-1 text-[10px] uppercase tracking-wide text-slate-400">Other members</p>
+            <p className="pt-1 text-[10px] uppercase tracking-wide text-slate-400">Other users</p>
           )}
           {others.map((m) => row(m, false))}
           {suggested.length === 0 && others.length === 0 && (
-            <p className="text-xs text-slate-400">No project members available.</p>
+            <p className="text-xs text-slate-400">No users available.</p>
           )}
         </div>
 

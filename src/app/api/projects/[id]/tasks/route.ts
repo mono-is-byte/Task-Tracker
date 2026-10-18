@@ -1,7 +1,7 @@
 import { fail, ok, readJson, requireMember } from "@/lib/api";
 import { db } from "@/lib/db";
 import { loadProject } from "@/lib/server";
-import { TaskInput, ctxFromLoad, createTask, listTasks } from "@/lib/tasks";
+import { TaskInput, ctxFromLoad, createTask, defaultCreationStatusId, listTasks } from "@/lib/tasks";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -44,7 +44,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const parsed = TaskInput.safeParse(value);
   if (!parsed.success) return fail(400, "validation", "Invalid task fields.", parsed.error.issues);
   try {
-    const task = await createTask(db, ctxFromLoad(loaded.project, auth.membership, auth.user.id), parsed.data);
+    // Creation rule (change request): tasks created through the API always
+    // start in To Do — overriding any statusId an older client may send. The
+    // Board/Table creation forms only offer the To Do column as well.
+    const statusId = await defaultCreationStatusId(db, id);
+    const task = await createTask(db, ctxFromLoad(loaded.project, auth.membership, auth.user.id), { ...parsed.data, statusId });
     return ok({ task }, 201);
   } catch (e) {
     return fail(403, "forbidden", e instanceof Error ? e.message : "Cannot create task.");
