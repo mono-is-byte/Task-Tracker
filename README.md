@@ -1,6 +1,6 @@
 # TaskTracker
 
-A self-hosted, multi-user task tracker — a lightweight Jira alternative for small teams.
+A self-hosted, multi-user task tracker - a lightweight project management tool for small teams.
 Kanban boards, an inline-editable table, timeline, workload, calendar and reports, with
 per-project roles, field-level permissions, custom workflows and automation.
 
