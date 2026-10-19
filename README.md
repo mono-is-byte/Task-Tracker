@@ -190,7 +190,7 @@ would be regenerated for the new database.
 | Framework | **Next.js 16** (App Router) | Server components, route handlers |
 | UI | **React 19** + **Tailwind CSS 4** | CSS-variable theming (`@theme inline`) |
 | Language | **TypeScript 7** | Strict mode, `@/*` path alias |
-| ORM / DB | **Prisma 7** + **SQLite** (`better-sqlite3` adapter) | Portable schema, Postgres-ready |
+| ORM / DB | **Prisma 7** + **SQLite** (`better-sqlite3` / libSQL) | Local file by default; Turso for serverless hosts |
 | Auth | Custom cookie sessions + **bcryptjs** | Opaque tokens, SHA-256 hashed at rest |
 | Validation | **Zod 4** | Request/query validation |
 | Spreadsheets | **xlsx** | Excel / CSV import and export |
@@ -325,8 +325,10 @@ accounts for local development only:
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `DATABASE_URL` | ✅ | `file:./dev.db` for SQLite; a `postgresql://…` URL after switching providers |
-| `SESSION_SECRET` | ✅ | Long random string used for signing; sessions themselves are opaque, hashed tokens |
+| `DATABASE_URL` | ✅ (local) | `file:./dev.db` for the local SQLite file; the Prisma CLI also reads this for `migrate`/`seed`. |
+| `TURSO_DATABASE_URL` | — | Remote libSQL/Turso URL (`libsql://…`). When set, the running app uses it instead of the local file — required on serverless hosts such as Vercel. |
+| `TURSO_AUTH_TOKEN` | — | Turso database token (`turso db tokens create <db>`); required whenever `TURSO_DATABASE_URL` is remote. |
+| `SESSION_SECRET` | ✅ | Long random string reserved for signing; sessions themselves are opaque, hashed tokens |
 | `APP_URL` | — | Base URL of the app; cookies are marked `Secure` when it starts with `https://` (and always in production) |
 | `SMTP_URL` | — | If set, forgot-password issues a one-hour reset token and writes it to the server log for an operator to deliver; if unset, users are told to ask an admin |
 | `SMTP_FROM` | — | From address intended for mail delivery — not read by the current build, which logs reset tokens instead of sending mail |
@@ -338,6 +340,8 @@ placeholders only.
 
 ## Running in Production
 
+### Self-hosted (SQLite file)
+
 ```bash
 npm run build
 npm start
@@ -345,9 +349,52 @@ npm start
 
 - `npm start` reads `.env` and serves on **http://localhost:3000** by default.
 - Set `PORT` to serve on a different port.
-- For a hosted database, change the Prisma datasource provider to `postgresql` and set
-  `DATABASE_URL`; the committed migrations are SQLite SQL and would be regenerated
-  against the new database.
+- Any host with a **persistent disk** (VPS, Docker, Railway/Render/Fly with a volume) can
+  run this exactly as-is — the database is the `dev.db` file.
+
+### Vercel (SQLite via Turso)
+
+Vercel's filesystem is **read-only** and per-invocation, so a SQLite *file* cannot live
+there. The app therefore supports a remote **libSQL/Turso** database — same SQLite dialect,
+same migrations, same tests:
+
+1. Create a database at [turso.tech](https://turso.tech) and copy its URL + token:
+   ```bash
+   turso db create tasktracker
+   turso db show tasktracker --url          # libsql://<db>-<org>.turso.io
+   turso db tokens create tasktracker       # token
+   ```
+2. Apply the committed migrations to it (from your machine, once per schema change):
+   ```bash
+   TURSO_DATABASE_URL="libsql://<db>-<org>.turso.io" \
+   TURSO_AUTH_TOKEN="<token>" npm run turso:migrate
+   ```
+3. Create the first admin user by seeding against Turso:
+   ```bash
+   TURSO_DATABASE_URL="libsql://<db>-<org>.turso.io" \
+   TURSO_AUTH_TOKEN="<token>" npm run seed -- --reset
+   ```
+   (This writes to the remote database only — the local `dev.db` is untouched.)
+4. In **Vercel → Project → Settings → Environment Variables** add:
+   `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `APP_URL` (your `https://…` URL) and
+   `SESSION_SECRET`. Do **not** set `DATABASE_URL` to a file path on Vercel.
+5. Redeploy.
+
+`src/lib/db.ts` picks the libSQL driver when `TURSO_DATABASE_URL` is set and
+`better-sqlite3` otherwise, so no code change is needed per environment.
+
+Known serverless limitations:
+
+- **Avatar uploads** write to `public/uploads/`, which is read-only on Vercel — uploads
+  fail there (the rest of the app is unaffected).
+- **Realtime SSE** is in-process, so it only matters for a single instance; the client
+  already falls back to 15-second polling.
+- The background **timer sweep** (`instrumentation.ts`) does not run on serverless; timer
+  state is still derived on read, so the UI stays correct.
+
+For a hosted PostgreSQL instead, change the Prisma datasource provider to `postgresql`,
+regenerate the SQLite migrations against Postgres, and switch to `@prisma/adapter-pg`.
+
 
 ---
 
@@ -454,6 +501,7 @@ dashboard aggregation, PDF generation, user management and Bangla-safe search.
 | `npm test` | Run the Vitest suite (with scratch DB setup) |
 | `npm run seed` | Seed demo data (`npm run seed -- --reset` to wipe first) |
 | `npm run db-push` | `prisma db push` for quick schema sync |
+| `npm run turso:migrate` | Apply the committed migrations to the remote Turso database |
 | `scripts/_apply-migration.mjs` | Apply committed migrations to the dev database |
 | `scripts/crawl-check.mjs` | Log in and crawl every page / API route for errors |
 
@@ -472,6 +520,10 @@ dashboard aggregation, PDF generation, user management and Bangla-safe search.
 - **Tests fail against a stale scratch database** — `pretest` only applies migrations to
   missing or empty `tests/test-*.db` files; delete the stale file(s) and rerun `npm test`
   to rebuild them from the committed migrations.
+- **Sign-in fails with a 500 after deploying to Vercel** — Vercel cannot host a SQLite
+  *file* (read-only filesystem). Set `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN`, apply the
+  migrations with `npm run turso:migrate`, and seed the database — see
+  [Vercel (SQLite via Turso)](#vercel-sqlite-via-turso).
 - **Sign-in fails on a fresh clone** — make sure `.env` exists and
   `npx prisma migrate dev` has been run from the repository root.
 

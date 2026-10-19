@@ -11,7 +11,8 @@
     "postinstall": "prisma generate",
     "pretest": "node scripts/pretest.mjs",
     "seed": "tsx prisma/seed.ts",
-    "db-push": "prisma db push"
+    "db-push": "prisma db push",
+    "turso:migrate": "node scripts/migrate-turso.mjs"
   },
   "keywords": [],
   "author": "",
@@ -19,6 +20,7 @@
   "private": "true",
   "dependencies": {
     "@prisma/adapter-better-sqlite3": "^7.10.0",
+    "@prisma/adapter-libsql": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^13.0.3",

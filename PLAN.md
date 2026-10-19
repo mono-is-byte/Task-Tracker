@@ -451,3 +451,38 @@ Done", and a light project-wide optimization pass.
 - The app's `X-Frame-Options: deny` header (README security notes) was incidentally re-confirmed when a same-origin test frame was refused — security headers working as documented.
 - Screenshots could not be captured this phase: the harness desktop window reported "Screenshot needs a visible tab" throughout (the known window-visibility limitation), so verification above used `getComputedStyle`/DOM measurements and their recorded values instead.
 
+### Phase 14 — Serverless deployment: Vercel + Turso (2026-10-19)
+
+Problem: the app logged in locally but returned a **500** on the deployed Vercel URL.
+Cause: the database is a SQLite **file** (`DATABASE_URL="file:./dev.db"`), the file is
+gitignored, and Vercel's filesystem is read-only/per-invocation — so no schema, no users,
+no writable session store.
+
+| Decision | How | Where |
+|---|---|---|
+| Keep the SQLite dialect | Postgres would require regenerating all 13 migrations, rewriting `scripts/pretest.mjs` and the 197 tests (no local Postgres exists). Remote **libSQL/Turso** speaks the same dialect, so migrations, seed and the whole test suite stay untouched. | recorded decision |
+| Runtime driver switch | `TURSO_DATABASE_URL` (or a `libsql://`/`http(s)://` `DATABASE_URL`) selects `PrismaLibSql` from **`@prisma/adapter-libsql/web`**; otherwise the local file keeps using `PrismaBetterSqlite3`. The `/web` entrypoint talks HTTP/WebSocket through `@libsql/client/web` and imports **no native module**, which matters on Vercel. Exported `usesRemoteSqlite` for environment-aware code. `makeTestClient` stays file-based, so tests are unchanged and offline. | `lib/db.ts` |
+| CLI stays local | `prisma.config.ts` keeps a local-file fallback (`process.env.DATABASE_URL ?? "file:./dev.db"`) and declares the migrations path + seed, so `prisma generate` works on Vercel even without `DATABASE_URL`. | `prisma.config.ts` |
+| Remote migrations | Prisma Migrate cannot reach Turso over HTTP, so `scripts/migrate-turso.mjs` replays the same committed `migration.sql` files statement-by-statement (same comment-stripping/splitting rule as `pretest.mjs`) and records them in `_applied_migrations`; re-runs are idempotent. | `scripts/migrate-turso.mjs`, `npm run turso:migrate` |
+| Seeding | `npm run seed -- --reset` with `TURSO_DATABASE_URL` set seeds the remote database, because the seed imports the same `db` client. Nothing is written locally. | `prisma/seed.ts` (unchanged) |
+| Bundling | `serverExternalPackages: ["better-sqlite3", "@libsql/client"]` keeps the native/server drivers outside the server bundle. | `next.config.ts` |
+| Docs | New README "Vercel (SQLite via Turso)" section + env table + troubleshooting entry; `.env.example` documents the two Turso variables. | `README.md`, `.env.example` |
+
+- **No migrations, no schema change, no data rewritten.** Local development and self-hosting
+  are unchanged (still `file:./dev.db`).
+- **Dependency added:** `@prisma/adapter-libsql` (pulls `@libsql/client`; platform binaries ship
+  as optional packages, so no compiler is needed on Vercel).
+- **Verified:** `tsc --noEmit` clean, `npm test` **197/197** (15 files), `npm run build` green;
+  adapter selection checked for local (`usesRemoteSqlite === false`) and `libsql://`
+  (`true`); `scripts/migrate-turso.mjs` applied all 13 migrations to a scratch libSQL file
+  (119 statements, idempotent on a second run) and cleans up after itself.
+- **Not verified:** a real Turso round-trip (no credentials in this environment) and the
+  Vercel build itself. Known limitations documented: avatar uploads need read-only-FS
+  storage, SSE is in-process (polling fallback exists), and the instrumentation timer sweep
+  does not run on serverless.
+- Local tooling note: `better-sqlite3@13` has no `install` script, so npm falls back to
+  `node-gyp rebuild` and a Windows machine without Python/MSVC cannot install it. Root
+  `package.json` was left at `^13.0.3`; verification used a temporary `^12.11.1` (prebuilt)
+  and the lockfile was regenerated back to 13.0.3 afterwards.
+
+
