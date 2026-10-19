@@ -104,8 +104,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   return new Response(new Uint8Array(avatar.bytes), {
     headers: {
       "Content-Type": avatar.mimeType,
-      // The stored URL carries a ?v= stamp that changes on every upload.
-      "Cache-Control": "public, max-age=31536000, immutable",
+      // The stored URL carries a ?v= stamp that changes on every upload, so the
+      // response is immutable — `s-maxage` lets Vercel's CDN cache it too, which
+      // keeps avatar loads from hitting the function/database on every request.
+      "Cache-Control": "public, max-age=31536000, s-maxage=31536000, immutable",
     },
   });
 }

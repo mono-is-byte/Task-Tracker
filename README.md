@@ -387,7 +387,11 @@ same migrations, same tests:
 4. In **Vercel → Project → Settings → Environment Variables** add:
    `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `APP_URL` (your `https://…` URL) and
    `SESSION_SECRET`. Do **not** set `DATABASE_URL` to a file path on Vercel.
-5. Redeploy.
+5. **Match the regions.** Vercel Functions default to `iad1` (US East), while a Turso
+   database lives in one AWS region — every request/query would then cross the world. The
+   committed `vercel.json` sets the function region to `bom1` (Mumbai); keep it equal to the
+   Turso database's region (`bom1` ↔ `aws-ap-south-1`, `sin1` ↔ `aws-ap-southeast-1`).
+6. Redeploy.
 
 `src/lib/db.ts` picks the libSQL driver when `TURSO_DATABASE_URL` is set and
 `better-sqlite3` otherwise, so no code change is needed per environment.

@@ -485,4 +485,30 @@ no writable session store.
   `package.json` was left at `^13.0.3`; verification used a temporary `^12.11.1` (prebuilt)
   and the lockfile was regenerated back to 13.0.3 afterwards.
 
+### Phase 15 — Live latency: function/DB region alignment (2026-10-19)
+
+Report: the deployed site was "very slow" to respond and load. Measured against the live URL:
+
+| Probe | TTFB | Reading |
+|---|---|---|
+| `/login` (static) | ~170 ms | `X-Vercel-Cache: HIT` — fine |
+| `/api/auth/me` (dynamic, **no DB call** — returns 401 without a cookie) | ~360–390 ms | `X-Vercel-Id: bom1::**iad1**::…` |
+
+| Decision | How | Where |
+|---|---|---|
+| Function region | Vercel Functions default to `iad1` (US East); the edge PoP serving Bangladesh is `bom1` (Mumbai), so **every** dynamic request paid an extra ~220 ms edge→function→edge hop. The Turso database is in `aws-ap-south-1`, so the function belongs in `bom1` too. | `vercel.json` (`"regions": ["bom1"]`) |
+| Per-request viewer lookup | App layout **and** the page it wraps both called `requireViewer` → the same `Session` read plus the idle-window `Session` write ran twice per navigation. Wrapped `getViewer` in React `cache()`: one lookup per request (API routes are unaffected — they use `requireUser`). | `lib/server.ts` |
+| Project load | `loadProject` awaited `project.findUnique` before `getMembership`, although neither depends on the other. Now `Promise.all` → one fewer round trip before the parallel block. | `lib/server.ts` |
+| Avatar responses | DB-backed avatars were browser-cacheable only (`max-age`); `s-maxage` lets Vercel's CDN cache them as well, so the versioned URL (`?v=`) stops hitting the function/database. | `api/users/[id]/avatar/route.ts` |
+| Docs | README deploy step 5 explains matching the function region to the Turso region. | `README.md` |
+
+- **Why region first:** with 13 DB round trips for the dashboard, a co-located Turso adds a
+  few ms each; a cross-region one would add hundreds per query — so moving the function
+  without moving the database would have made things worse.
+- **No schema/API changes.**
+- **Verified:** `prisma generate` (the `UserAvatar` client was stale), `tsc --noEmit` clean,
+  `npm test` **198/198** (15 files), `npm run build` green.
+- **Not verified:** the post-change latency — that needs the redeploy with `bom1`.
+
+
 

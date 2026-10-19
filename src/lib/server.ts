@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import type { User } from "@prisma/client";
 import { COOKIE_NAME, getSessionUser } from "./auth";
 import { db, taskKey } from "./db";
@@ -8,12 +9,18 @@ import { listAssignableUsers, type DirectoryUser } from "./userDirectory";
 
 export { taskKey };
 
-export async function getViewer(): Promise<{ user: User; sessionId: string } | null> {
+/**
+ * Per-request memoisation: the app layout and the page it wraps both ask for
+ * the viewer, and `getSessionUser` is a database read (plus an idle-window
+ * write). `cache()` makes that ONE lookup per navigation instead of two — which
+ * matters a lot when the database is remote (serverless/Turso).
+ */
+export const getViewer = cache(async (): Promise<{ user: User; sessionId: string } | null> => {
   const jar = await cookies();
   const token = jar.get(COOKIE_NAME)?.value;
   const su = await getSessionUser(db, token);
   return su;
-}
+});
 
 export async function requireViewer(next?: string): Promise<{ user: User; sessionId: string }> {
   const su = await getViewer();
@@ -51,10 +58,13 @@ function parseArr(json: string, fallback: number[]): number[] {
 }
 
 export async function loadProject(projectId: string, userId: string, isSuperAdmin: boolean): Promise<ProjectContext | null> {
-  const project = await db.project.findUnique({ where: { id: projectId } });
-  if (!project) return null;
-  const membership = await getMembership(db, userId, isSuperAdmin, projectId);
-  if (!membership) return null;
+  // These two do not depend on each other — fetch them in parallel so a remote
+  // database costs one round trip instead of two.
+  const [project, membership] = await Promise.all([
+    db.project.findUnique({ where: { id: projectId } }),
+    getMembership(db, userId, isSuperAdmin, projectId),
+  ]);
+  if (!project || !membership) return null;
   const [statuses, priorities, issueTypes, members, epics, customFields, designationTags] = await Promise.all([
     db.status.findMany({ where: { projectId }, orderBy: { position: "asc" } }),
     db.priority.findMany({ where: { projectId }, orderBy: { level: "desc" } }),
