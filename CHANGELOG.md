@@ -59,6 +59,10 @@ Release sections will be added here as versions are tagged.
   a shared icon set.
 - **Bangla-safe search**: NFC-normalized, case-folded matching with the Noto Sans Bengali
   font loaded as a fallback.
+- **Serverless / Turso support**: the app talks to a remote libSQL/Turso database when
+  `TURSO_DATABASE_URL` is set; `npm run turso:migrate` replays the committed migrations
+  there idempotently, and `npm run admin:create` creates or repairs a fixed super-admin
+  account on whichever database the environment selects.
 
 ### Changed
 

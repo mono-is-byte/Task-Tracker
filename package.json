@@ -11,6 +11,7 @@
     "postinstall": "prisma generate",
     "pretest": "node scripts/pretest.mjs",
     "seed": "tsx prisma/seed.ts",
+    "admin:create": "tsx scripts/create-admin.ts",
     "db-push": "prisma db push",
     "turso:migrate": "node scripts/migrate-turso.mjs"
   },

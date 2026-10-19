@@ -211,6 +211,8 @@ Task-Tracker/
 ├─ scripts/
 │  ├─ pretest.mjs            # builds scratch test DBs from migrations (runs on npm test)
 │  ├─ _apply-migration.mjs   # applies committed migrations to the dev database
+│  ├─ migrate-turso.mjs      # applies committed migrations to a remote Turso DB
+│  ├─ create-admin.ts        # create/repair the fixed super-admin (local or Turso)
 │  ├─ crawl-check.mjs        # logs in and crawls every page / API route
 │  ├─ import-check.mjs       # CSV/XLSX import smoke check
 │  ├─ sse-check.mjs          # realtime (SSE) smoke check
@@ -375,6 +377,9 @@ same migrations, same tests:
    TURSO_AUTH_TOKEN="<token>" npm run seed -- --reset
    ```
    (This writes to the remote database only — the local `dev.db` is untouched.)
+   To skip the demo team and create only a fixed super-admin account instead, use
+   `npm run admin:create` with the same environment variables (it prints the
+   credentials it sets).
 4. In **Vercel → Project → Settings → Environment Variables** add:
    `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `APP_URL` (your `https://…` URL) and
    `SESSION_SECRET`. Do **not** set `DATABASE_URL` to a file path on Vercel.
@@ -500,6 +505,7 @@ dashboard aggregation, PDF generation, user management and Bangla-safe search.
 | `npm start` | Serve the production build |
 | `npm test` | Run the Vitest suite (with scratch DB setup) |
 | `npm run seed` | Seed demo data (`npm run seed -- --reset` to wipe first) |
+| `npm run admin:create` | Create/repair the fixed super-admin account (local or Turso, per env) |
 | `npm run db-push` | `prisma db push` for quick schema sync |
 | `npm run turso:migrate` | Apply the committed migrations to the remote Turso database |
 | `scripts/_apply-migration.mjs` | Apply committed migrations to the dev database |
