@@ -64,6 +64,9 @@ Release sections will be added here as versions are tagged.
   there idempotently, and `npm run admin:create` creates or repairs a fixed super-admin
   account on whichever database the environment selects; `npm run turso:copy-local`
   copies an existing local `dev.db` up to Turso, replacing the remote data.
+- **Serverless avatars**: when the filesystem is read-only, the uploaded JPEG is
+  stored in the database (`UserAvatar` table) and served from
+  `/api/users/<id>/avatar`; local installs keep writing `public/uploads/avatars`.
 
 ### Changed
 

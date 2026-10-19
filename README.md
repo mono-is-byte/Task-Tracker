@@ -394,12 +394,14 @@ same migrations, same tests:
 
 Known serverless limitations:
 
-- **Avatar uploads** write to `public/uploads/`, which is read-only on Vercel — uploads
-  fail there (the rest of the app is unaffected).
 - **Realtime SSE** is in-process, so it only matters for a single instance; the client
   already falls back to 15-second polling.
 - The background **timer sweep** (`instrumentation.ts`) does not run on serverless; timer
   state is still derived on read, so the UI stays correct.
+
+Avatar uploads work on serverless too: the JPEG is stored in the `UserAvatar` table and
+served through `/api/users/<id>/avatar`, while local/self-hosted runs keep writing files
+under `public/uploads/avatars`.
 
 For a hosted PostgreSQL instead, change the Prisma datasource provider to `postgresql`,
 regenerate the SQLite migrations against Postgres, and switch to `@prisma/adapter-pg`.
@@ -560,7 +562,8 @@ dashboard aggregation, PDF generation, user management and Bangla-safe search.
 - [ ] Bundle a mailer (or SMTP relay UI) so password reset links can be delivered directly.
 - [ ] Swap the in-process SSE pub/sub for a shared broker to support multiple app instances
       behind a load balancer.
-- [ ] Add local file storage for task attachments (avatars are already stored locally).
+- [ ] Add file storage for task attachments (avatars already work: on disk locally,
+      in the database on serverless).
 - [ ] Add first-class PostgreSQL deployment docs and an example migration guide.
 - [ ] Add a `LICENSE` file and screenshot gallery to the repository.
 - [ ] Expand integration tests around the realtime layer.

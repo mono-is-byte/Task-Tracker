@@ -36,7 +36,9 @@ if (!/^(libsql|wss?|https?):/i.test(remoteUrl)) {
 const local = new Database(localPath, { readonly: true });
 const remote = createClient({ url: remoteUrl, authToken });
 
-const SKIP_TABLES = new Set(["_applied_migrations", "_prisma_migrations"]);
+// Avatars are environment-specific binaries: the local install (filesystem
+// mode) never has UserAvatar rows, so copying would wipe live uploads.
+const SKIP_TABLES = new Set(["_applied_migrations", "_prisma_migrations", "UserAvatar"]);
 
 function allTables() {
   return local

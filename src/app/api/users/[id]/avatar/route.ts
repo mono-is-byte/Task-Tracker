@@ -1,14 +1,19 @@
 import { fail, ok, requireUser, clientIp } from "@/lib/api";
 import { audit } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { AVATAR_MAX_BYTES, avatarFileName, deleteAvatarFile, saveAvatarFile, validateAvatarUpload } from "@/lib/avatar";
+import { db, usesRemoteSqlite } from "@/lib/db";
+import { AVATAR_MAX_BYTES, avatarApiUrl, avatarFileName, deleteAvatarFile, saveAvatarFile, validateAvatarUpload } from "@/lib/avatar";
 import { canEditTargetUser } from "@/lib/users";
 
 /**
  * Change request Phase 4: avatar upload (.jpg/.jpeg only, <= 2 MB, validated by
- * extension + MIME + JPEG magic bytes; stored with a generated filename under
- * public/uploads/avatars). Users upload their own; Admins/PMs (for users of a
- * project they manage) may upload for others. A DELETE clears the avatar.
+ * extension + MIME + JPEG magic bytes). Users upload their own; Admins/PMs (for
+ * users of a project they manage) may upload for others. A DELETE clears the
+ * avatar.
+ *
+ * Storage follows the environment: local/self-hosted runs write a file under
+ * public/uploads/avatars (served statically), while serverless hosts with a
+ * read-only filesystem (e.g. Vercel) keep the JPEG in the UserAvatar table and
+ * serve it from GET /api/users/<id>/avatar.
  */
 
 async function resolveTarget(req: Request, targetId: string) {
@@ -51,8 +56,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   });
   if (invalid) return fail(400, "validation", invalid);
 
-  await deleteAvatarFile(process.cwd(), auth.target.avatarUrl);
-  const url = await saveAvatarFile(process.cwd(), avatarFileName(), buffer);
+  let url: string;
+  if (usesRemoteSqlite) {
+    // Serverless: the filesystem is read-only, so the bytes go into the database.
+    await db.userAvatar.upsert({
+      where: { userId: id },
+      create: { userId: id, mimeType: "image/jpeg", bytes: buffer },
+      update: { mimeType: "image/jpeg", bytes: buffer },
+    });
+    url = avatarApiUrl(id);
+  } else {
+    await deleteAvatarFile(process.cwd(), auth.target.avatarUrl);
+    url = await saveAvatarFile(process.cwd(), avatarFileName(), buffer);
+  }
   await db.user.update({ where: { id }, data: { avatarUrl: url } });
   await audit(db, {
     actorId: auth.user.id, action: "user.avatar_set", entity: "user", entityId: id,
@@ -65,10 +81,31 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const { id } = await params;
   const auth = await resolveTarget(req, id);
   if ("response" in auth) return auth.response;
-  await deleteAvatarFile(process.cwd(), auth.target.avatarUrl);
+  if (usesRemoteSqlite) {
+    await db.userAvatar.deleteMany({ where: { userId: id } });
+  } else {
+    await deleteAvatarFile(process.cwd(), auth.target.avatarUrl);
+  }
   await db.user.update({ where: { id }, data: { avatarUrl: null } });
   await audit(db, {
     actorId: auth.user.id, action: "user.avatar_clear", entity: "user", entityId: id, ip: clientIp(req),
   });
   return ok({ avatarUrl: null });
+}
+
+/** Serves the database-backed avatar (serverless storage). Unknown → 404. */
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const avatar = await db.userAvatar.findUnique({
+    where: { userId: id },
+    select: { mimeType: true, bytes: true },
+  });
+  if (!avatar) return new Response(null, { status: 404 });
+  return new Response(new Uint8Array(avatar.bytes), {
+    headers: {
+      "Content-Type": avatar.mimeType,
+      // The stored URL carries a ?v= stamp that changes on every upload.
+      "Cache-Control": "public, max-age=31536000, immutable",
+    },
+  });
 }

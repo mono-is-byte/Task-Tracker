@@ -16,6 +16,7 @@ import {
 } from "../src/lib/users";
 import {
   AVATAR_MAX_BYTES,
+  avatarApiUrl,
   avatarFileName,
   deleteAvatarFile,
   isJpegBuffer,
@@ -389,6 +390,10 @@ describe("avatar uploads (Phase 4)", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("builds cache-busting API URLs for the database-backed avatar route", () => {
+    expect(avatarApiUrl("user_123")).toMatch(/^\/api\/users\/user_123\/avatar\?v=\d+$/);
   });
 });
 

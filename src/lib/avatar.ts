@@ -40,6 +40,15 @@ export function avatarFileName(): string {
   return `av-${Date.now().toString(36)}-${randomBytes(6).toString("hex")}.jpg`;
 }
 
+/**
+ * Public URL of the database-backed avatar (serverless hosts): the picture is
+ * served from GET /api/users/<id>/avatar. The ?v= stamp changes on every upload
+ * so browsers fetch the new image instead of a cached one.
+ */
+export function avatarApiUrl(userId: string): string {
+  return `/api/users/${userId}/avatar?v=${Date.now()}`;
+}
+
 /** Writes the avatar under <root>/public/uploads/avatars and returns its public URL. */
 export async function saveAvatarFile(rootDir: string, fileName: string, buffer: Buffer): Promise<string> {
   const dir = avatarDir(rootDir);

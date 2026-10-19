@@ -43,6 +43,18 @@ model User {
   notifications  Notification[]
   savedViews     SavedView[]
   resets         PasswordReset[]
+  avatarFile     UserAvatar?
+}
+
+/// Serverless avatar storage: on hosts with a read-only filesystem (e.g. Vercel)
+/// the uploaded JPEG lives here instead of public/uploads/. Local/self-hosted
+/// installs keep writing files to disk and never fill this table.
+model UserAvatar {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mimeType  String
+  bytes     Bytes
+  updatedAt DateTime @updatedAt
 }
 
 model Session {
