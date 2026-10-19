@@ -26,3 +26,6 @@ coverage/
 
 # User-uploaded files
 public/uploads/
+
+.vercel
+.env*
