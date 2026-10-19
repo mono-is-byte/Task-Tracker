@@ -62,7 +62,8 @@ Release sections will be added here as versions are tagged.
 - **Serverless / Turso support**: the app talks to a remote libSQL/Turso database when
   `TURSO_DATABASE_URL` is set; `npm run turso:migrate` replays the committed migrations
   there idempotently, and `npm run admin:create` creates or repairs a fixed super-admin
-  account on whichever database the environment selects.
+  account on whichever database the environment selects; `npm run turso:copy-local`
+  copies an existing local `dev.db` up to Turso, replacing the remote data.
 
 ### Changed
 

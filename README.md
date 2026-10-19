@@ -212,6 +212,7 @@ Task-Tracker/
 │  ├─ pretest.mjs            # builds scratch test DBs from migrations (runs on npm test)
 │  ├─ _apply-migration.mjs   # applies committed migrations to the dev database
 │  ├─ migrate-turso.mjs      # applies committed migrations to a remote Turso DB
+│  ├─ copy-local-to-turso.mjs # copies the local SQLite data up to a remote Turso DB
 │  ├─ create-admin.ts        # create/repair the fixed super-admin (local or Turso)
 │  ├─ crawl-check.mjs        # logs in and crawls every page / API route
 │  ├─ import-check.mjs       # CSV/XLSX import smoke check
@@ -380,6 +381,9 @@ same migrations, same tests:
    To skip the demo team and create only a fixed super-admin account instead, use
    `npm run admin:create` with the same environment variables (it prints the
    credentials it sets).
+   To copy your **existing local data** up to Turso instead — the remote database
+   then matches your `dev.db` exactly — run `npm run turso:copy-local` with the
+   same environment variables.
 4. In **Vercel → Project → Settings → Environment Variables** add:
    `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `APP_URL` (your `https://…` URL) and
    `SESSION_SECRET`. Do **not** set `DATABASE_URL` to a file path on Vercel.
@@ -508,6 +512,7 @@ dashboard aggregation, PDF generation, user management and Bangla-safe search.
 | `npm run admin:create` | Create/repair the fixed super-admin account (local or Turso, per env) |
 | `npm run db-push` | `prisma db push` for quick schema sync |
 | `npm run turso:migrate` | Apply the committed migrations to the remote Turso database |
+| `npm run turso:copy-local` | Copy the local database (`dev.db`) into the remote Turso database, replacing its data |
 | `scripts/_apply-migration.mjs` | Apply committed migrations to the dev database |
 | `scripts/crawl-check.mjs` | Log in and crawl every page / API route for errors |
 

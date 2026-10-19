@@ -13,7 +13,8 @@
     "seed": "tsx prisma/seed.ts",
     "admin:create": "tsx scripts/create-admin.ts",
     "db-push": "prisma db push",
-    "turso:migrate": "node scripts/migrate-turso.mjs"
+    "turso:migrate": "node scripts/migrate-turso.mjs",
+    "turso:copy-local": "node scripts/copy-local-to-turso.mjs"
   },
   "keywords": [],
   "author": "",
