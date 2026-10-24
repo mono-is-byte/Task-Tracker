@@ -1,19 +1,20 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import { audit, pruneAuditLog } from "./audit";
 import { runAutomation } from "./automation";
 import { recomputeProjectCompletion } from "./completion";
 import { estDays, matchesSearch, taskSearchText } from "./domain";
 import { publish, publishGlobal } from "./events";
-import { canDo, canEditTask, fieldRule, getAllowedTransitions, safeArr, type Membership } from "./permissions";
+import { filterVisibleNotes } from "./notes";
+import { canBypassTransitions, canDo, canEditTask, fieldRule, safeArr, type FieldRuleMap, type Membership } from "./permissions";
 import { stageTransitionData, timerInfo, type TimerFields } from "./timer";
+import { canTransition, type TransitionRule } from "./workflow";
 
 export const TaskInput = z.object({
   title: z.string().min(1).max(300).optional(),
   description: z.string().max(20000).nullable().optional(),
   typeId: z.string().nullable().optional(),
-  storyId: z.string().nullable().optional(),
   epicId: z.string().nullable().optional(),
-  storyPoints: z.number().min(0).max(100).nullable().optional(),
   estHours: z.number().min(0).max(10000).nullable().optional(),
   rdTime: z.number().min(0).max(10000).nullable().optional(),
   loggedHours: z.number().min(0).max(10000).nullable().optional(),
@@ -36,9 +37,10 @@ export interface TaskContext {
   projectId: string;
   projectKey: string;
   hoursPerDay: number;
-  pointScale: number[];
   membership: Membership;
   userId: string;
+  /** PHASE 6b: request IP so audit rows written inside this context carry it. */
+  ip?: string;
 }
 
 function parseDate(v: string | null | undefined): Date | null | undefined {
@@ -77,34 +79,99 @@ export function serializeTask<T extends Record<string, unknown>>(prefix: string,
 const TASK_ROW_INCLUDE = {
   status: true, priority: true, type: true,
   assignee: { select: { id: true, name: true, username: true, avatarUrl: true } },
+  // PHASE 4: current "assigned by" snapshot. `deletedAt` lets the UI mark a
+  // since-deleted user as "(removed)" instead of pretending they are active.
+  assignedBy: { select: { id: true, name: true, username: true, avatarUrl: true, deletedAt: true } },
   testedBy: { select: { id: true, name: true, username: true, avatarUrl: true } },
   epic: { select: { id: true, name: true, color: true } },
-  story: { select: { id: true, title: true } },
+  // PHASE 11.3: notes travel with every task row (Board cards + Table column);
+  // the drawer's detail response carries the same list. No per-task N+1.
+  comments: {
+    include: { author: { select: { id: true, name: true, deletedAt: true } } },
+    orderBy: { createdAt: "asc" },
+  },
   _count: { select: { comments: true, linksFrom: true, linksTo: true } },
 } satisfies Prisma.TaskInclude;
 
+/**
+ * Phase 1: server-side field-rule enforcement. Which serialized keys each
+ * canonical task field maps to — used to NULL hidden fields out of API
+ * responses (the client must never receive data it may not read).
+ */
+const FIELD_RESPONSE_KEYS: Record<string, string[]> = {
+  title: ["title"],
+  description: ["description"],
+  type: ["type", "typeId"],
+  estHours: ["estHours"],
+  rdTime: ["rdTime"],
+  loggedHours: ["loggedHours"],
+  priority: ["priority", "priorityId"],
+  // `status` is never stripped: every view renders the column from it.
+  status: ["status", "statusId"],
+  // PHASE 4: the "assigned by" snapshot is part of the assignee field — when a
+  // role may not read the assignee, it may not read who assigned them either.
+  assignee: ["assignee", "assigneeId", "assignedBy", "assignedById", "assignedAt"],
+  testedBy: ["testedBy", "testedById"],
+  startDate: ["startDate"],
+  endDate: ["endDate"],
+  gitBranch: ["gitBranch"],
+  labels: ["labels"],
+  epic: ["epic", "epicId"],
+  dependency: ["dependency"],
+  remarks: ["remarks"],
+  feedback: ["feedback"],
+};
+
+/**
+ * Remove every field the role may not READ (rule = "hidden") from a serialized
+ * task row. `status`/`statusId` are intentionally kept — hiding the column
+ * would break every board/table renderer — and a hidden `custom:*` rule empties
+ * the whole customValues bag.
+ */
+export function stripHiddenFields<T extends Record<string, unknown>>(row: T, fieldRules: FieldRuleMap | undefined): T {
+  const rules = fieldRules ?? {};
+  const out = row as Record<string, unknown>;
+  for (const [field, rule] of Object.entries(rules)) {
+    if (rule !== "hidden") continue;
+    if (field === "status") continue;
+    const keys = FIELD_RESPONSE_KEYS[field];
+    if (keys) for (const k of keys) if (k in out) out[k] = null;
+  }
+  if (rules["custom:*"] === "hidden" && "customValues" in out) out.customValues = {};
+  // PHASE 11.3: remarks/feedback obey their field rules too. A hidden kind is
+  // removed from the notes payload and from the count the UI displays.
+  if (Array.isArray(out.comments)) {
+    const visible = filterVisibleNotes(out.comments as { kind: string }[], rules);
+    out.comments = visible;
+    const count = out._count as { comments?: number } | undefined;
+    if (count && typeof count === "object") count.comments = visible.length;
+  }
+  return row;
+}
+
 /** The serialized task row every view renders (identical to `listTasks` rows). */
 function serializeFullTask<T extends Record<string, unknown>>(row: T, ctx: TaskContext) {
-  return serializeTask(ctx.projectKey, ctx.hoursPerDay, row);
+  return serializeTask(ctx.projectKey, ctx.hoursPerDay, row) as T & Record<string, unknown>;
 }
 
 /** The authoritative, serialized row for one task — same shape as `listTasks`. */
 async function fullTaskRow(client: PrismaClient, ctx: TaskContext, taskId: string) {
   const row = await client.task.findUniqueOrThrow({ where: { id: taskId }, include: TASK_ROW_INCLUDE });
-  return serializeFullTask(row as unknown as typeof row & Record<string, unknown>, ctx);
+  return stripHiddenFields(serializeFullTask(row as unknown as typeof row & Record<string, unknown>, ctx), ctx.membership.fieldRules);
 }
 
-/** Admin/PM level for the current membership (used by status bypass and timer scheduling). */
+/** Manager level for timer scheduling (Admin/PM). NOTE: this is NOT the
+ *  workflow bypass — see `canBypassTransitions` in permissions.ts. */
 export function managerLevel(m: Membership): boolean {
   return m.isSuperAdmin || canDo(m.perms, "manage_workflow") || canDo(m.perms, "manage_archive");
 }
 
 export interface TaskFilters {
   epicId?: string;
-  storyId?: string;
   statusId?: string;
   priorityId?: string;
   assigneeId?: string;
+  assignedById?: string;
   testedById?: string;
   typeId?: string;
   search?: string;
@@ -116,9 +183,12 @@ export interface TaskFilters {
 
 export async function listTasks(client: PrismaClient, ctx: TaskContext, filters: TaskFilters) {
   const where: Record<string, unknown> = { projectId: ctx.projectId };
-  for (const k of ["epicId", "storyId", "statusId", "priorityId", "assigneeId", "testedById", "typeId"] as const) {
+  for (const k of ["epicId", "statusId", "priorityId", "assigneeId", "testedById", "typeId"] as const) {
     if (filters[k]) where[k] = filters[k];
   }
+  // PHASE 4: filter by who assigned the task; "none" = never/unknown assigner.
+  if (filters.assignedById === "none") where.assignedById = null;
+  else if (filters.assignedById) where.assignedById = filters.assignedById;
   if (filters.archived === true) where.status = { category: "done" };
   if (filters.archived === false) where.status = { category: { not: "done" } };
   if (filters.label) where.labels = { contains: `"${filters.label}"` };
@@ -142,7 +212,7 @@ export async function listTasks(client: PrismaClient, ctx: TaskContext, filters:
       matchesSearch(
         taskSearchText({
           title: r.title, description: r.description,
-          storyTitle: r.story?.title, epicName: r.epic?.name,
+          epicName: r.epic?.name,
           gitBranch: r.gitBranch, key: `${ctx.projectKey}-${r.serial}`,
         }),
         q,
@@ -151,7 +221,12 @@ export async function listTasks(client: PrismaClient, ctx: TaskContext, filters:
   }
   return {
     total: filters.search ? tasks.length : total,
-    tasks: tasks.slice(0, take).map((t) => serializeTask(ctx.projectKey, ctx.hoursPerDay, t as unknown as Record<string, unknown>)),
+    tasks: tasks.slice(0, take).map((t) =>
+      stripHiddenFields(
+        serializeTask(ctx.projectKey, ctx.hoursPerDay, t as unknown as Record<string, unknown>),
+        ctx.membership.fieldRules,
+      ),
+    ),
   };
 }
 
@@ -168,12 +243,9 @@ async function assertRefs(client: PrismaClient, projectId: string, patch: TaskPa
     const t = await client.issueType.findFirst({ where: { id: patch.typeId!, projectId } });
     if (!t) throw new Error("Unknown issue type for this project.");
   }
-  for (const [field, model] of [["epicId", "epic"], ["storyId", "story"]] as const) {
-    const id = patch[field];
-    if (id) {
-      const rec = await (client[model] as { findFirst: (a: unknown) => Promise<unknown> }).findFirst({ where: { id, projectId } });
-      if (!rec) throw new Error(`Unknown ${model} for this project.`);
-    }
+  if (patch.epicId) {
+    const epic = await client.epic.findFirst({ where: { id: patch.epicId, projectId } });
+    if (!epic) throw new Error("Unknown epic for this project.");
   }
   for (const [field, label] of [["assigneeId", "Assignee"], ["testedById", "Tester"]] as const) {
     const id = patch[field];
@@ -184,13 +256,6 @@ async function assertRefs(client: PrismaClient, projectId: string, patch: TaskPa
       const u = await client.user.findUnique({ where: { id }, select: { id: true, deletedAt: true } });
       if (!u || u.deletedAt) throw new Error(`${label} must be a registered user.`);
     }
-  }
-}
-
-function checkPoints(points: number | null | undefined, scale: number[]) {
-  if (points == null) return;
-  if (!scale.includes(points)) {
-    throw new Error(`Story points must be one of: ${scale.join(", ")} (or empty).`);
   }
 }
 
@@ -219,7 +284,6 @@ export async function createTask(client: PrismaClient, ctx: TaskContext, input: 
   if (input.dueAt !== undefined && !managerLevel(membership)) {
     throw new Error("Only managers can set the timer schedule.");
   }
-  checkPoints(input.storyPoints ?? null, ctx.pointScale);
   await assertRefs(client, projectId, input);
 
   const [defaultStatus, defaultPriority, defaultType] = await Promise.all([
@@ -229,21 +293,22 @@ export async function createTask(client: PrismaClient, ctx: TaskContext, input: 
   ]);
   if (!defaultStatus || !defaultPriority) throw new Error("Project has no statuses/priorities.");
 
-  // field-level: hidden fields cannot be set
-  for (const f of ["storyPoints", "estHours", "priority", "assignee", "testedBy", "status"] as const) {
-    const provided =
-      f === "storyPoints" ? input.storyPoints !== undefined :
-      f === "estHours" ? input.estHours !== undefined :
-      f === "priority" ? input.priorityId !== undefined :
-      f === "assignee" ? input.assigneeId !== undefined :
-      f === "testedBy" ? input.testedById !== undefined :
-      input.statusId !== undefined;
-    if (provided && fieldRule(membership.fieldRules, f) === "hidden") {
-      throw new Error(`Field "${f}" is hidden for role ${membership.roleName}.`);
+  // Phase 1: field-level rules are enforced on the SERVER for creation too.
+  // Every provided field must be `editable` for the role; `hidden` and
+  // `readonly` writes are rejected. `statusId`/`position` are exempt: the API
+  // resolves the mandatory initial column (To Do) and the importer places rows
+  // explicitly — a new task's starting column is not a "status change".
+  for (const [patchKey, ruleKey] of Object.entries(FIELD_TO_RULE)) {
+    if (patchKey === "statusId" || patchKey === "position") continue;
+    const provided = (input as Record<string, unknown>)[patchKey];
+    if (provided === undefined) continue;
+    const rule = ruleKey === "custom" ? fieldRule(membership.fieldRules, "custom:*") : fieldRule(membership.fieldRules, ruleKey);
+    if (rule !== "editable" && !membership.isSuperAdmin) {
+      throw new Error(`Field "${ruleKey}" is ${rule} for role ${membership.roleName}.`);
     }
   }
   // estimates on create: need edit_estimates, or task lands with self (or unassigned)
-  const setsEstimates = input.storyPoints !== undefined || input.estHours !== undefined;
+  const setsEstimates = input.estHours !== undefined;
   const ownerId = input.assigneeId ?? null;
   if (setsEstimates && !canDo(membership.perms, "edit_estimates")) {
     if (!(canDo(membership.perms, "edit_task_own") && (ownerId === null || ownerId === userId))) {
@@ -267,15 +332,18 @@ export async function createTask(client: PrismaClient, ctx: TaskContext, input: 
         typeId: input.typeId ?? defaultType?.id ?? null,
         title,
         description: input.description ?? null,
-        storyId: input.storyId ?? null,
         epicId: input.epicId ?? null,
-        storyPoints: input.storyPoints ?? null,
         estHours: input.estHours ?? null,
         rdTime: input.rdTime ?? 0,
         loggedHours: input.loggedHours ?? 0,
         priorityId: input.priorityId ?? defaultPriority.id,
         statusId: input.statusId ?? defaultStatus.id,
         assigneeId: input.assigneeId ?? null,
+        // PHASE 4: derived, server-owned snapshot. `TaskInput` has no such keys,
+        // so a client-supplied assignedById/assignedAt is stripped by zod and
+        // can never be trusted from the request body.
+        assignedById: input.assigneeId ? userId : null,
+        assignedAt: input.assigneeId ? new Date() : null,
         testedById: input.testedById ?? null,
         startDate: parseDate(input.startDate) ?? null,
         endDate: parseDate(input.endDate) ?? null,
@@ -292,6 +360,16 @@ export async function createTask(client: PrismaClient, ctx: TaskContext, input: 
   await client.activity.create({
     data: { taskId: task.id, actorId: userId, action: "task.created" },
   });
+  if (task.assigneeId) {
+    // PHASE 4: an assignment at creation time is part of the task's assignment
+    // history too (before=null = "was unassigned").
+    await client.activity.create({
+      data: {
+        taskId: task.id, actorId: userId, action: "task.assigned", field: "assigneeId",
+        before: null, after: task.assigneeId,
+      },
+    });
+  }
   const full = await client.task.findUniqueOrThrow({
     where: { id: task.id },
     include: TASK_ROW_INCLUDE,
@@ -314,13 +392,16 @@ export async function createTask(client: PrismaClient, ctx: TaskContext, input: 
   if (completion.flipped) publishGlobal("projects_changed", { projectId, isCompleted: completion.isCompleted });
   // Board/table insert this row as-is (the store uses the response as the
   // authoritative row), so return the full serialized shape, not the bare tx row.
-  return serializeFullTask(full as unknown as typeof full & Record<string, unknown>, ctx);
+  return stripHiddenFields(
+    serializeFullTask(full as unknown as typeof full & Record<string, unknown>, ctx),
+    membership.fieldRules,
+  );
 }
 
 const FIELD_TO_RULE: Record<string, string> = {
   title: "title", description: "description", typeId: "type",
-  storyId: "story", epicId: "epic",
-  storyPoints: "storyPoints", estHours: "estHours", rdTime: "rdTime", loggedHours: "loggedHours",
+  epicId: "epic",
+  estHours: "estHours", rdTime: "rdTime", loggedHours: "loggedHours",
   priorityId: "priority", statusId: "status", assigneeId: "assignee", testedById: "testedBy",
   startDate: "startDate", endDate: "endDate", gitBranch: "gitBranch", labels: "labels",
   customValues: "custom", position: "status",
@@ -361,7 +442,6 @@ export async function updateTask(client: PrismaClient, ctx: TaskContext, taskId:
   if (!statusOnly && !canEditTask(membership, task.assigneeId, userId)) {
     throw new Error("Role cannot edit this task.");
   }
-  checkPoints(input.storyPoints, ctx.pointScale);
   await assertRefs(client, projectId, input);
 
   // Timer due time is Admin/PM-only; startedAt/stoppedAt are never accepted here —
@@ -383,22 +463,37 @@ export async function updateTask(client: PrismaClient, ctx: TaskContext, taskId:
     }
     if (patchKey === "statusId") {
       if (!canDo(membership.perms, "change_status")) throw new Error("Role cannot change status.");
-      if (v !== task.statusId) {
-        // Admin/PM (manage_workflow) and archive managers bypass the transition matrix:
-        // they may move to ANY status (the Archive "Re-open" action is always a backward move).
-        if (!isManager) {
-          // Forward-only rule: other roles may move a task ahead in the ordered statuses, never back.
-          if (targetStatus && targetStatus.position <= task.status.position) {
-            throw new Error("You cannot move a task back.");
-          }
-          const allowed = await getAllowedTransitions(client, projectId, task.statusId, membership.roleIds, membership.isSuperAdmin, task.typeId);
-          if (!allowed.some((tr) => tr.toId === v)) {
-            throw new Error("This status transition is not allowed for your role.");
-          }
+      if (v !== task.statusId && !canBypassTransitions(membership)) {
+        // Phase 1: the project's StatusTransition matrix is the ONLY way a
+        // non-bypass user may change status. No forward-only rule and no
+        // implicit allow: a missing A→B row means DENIED. Backward moves are
+        // allowed only when an explicit transition row exists (e.g. Done→Re-open).
+        const rows = await client.statusTransition.findMany({
+          where: { projectId, fromId: task.statusId },
+          select: { fromId: true, toId: true, roleIds: true, issueTypeIds: true },
+        });
+        const transitions: TransitionRule[] = rows.map((t) => ({
+          fromId: t.fromId,
+          toId: t.toId,
+          roleIds: safeArr(t.roleIds),
+          issueTypeIds: safeArr(t.issueTypeIds),
+        }));
+        const decision = canTransition({
+          transitions,
+          fromStatusId: task.statusId,
+          toStatusId: String(v),
+          roleIds: membership.roleIds,
+          bypass: false,
+          issueTypeId: task.typeId,
+        });
+        if (!decision.allowed) {
+          throw new Error(
+            `Moving "${task.status.name}" → "${targetStatus?.name ?? "that status"}" is not an allowed transition for your role.`,
+          );
         }
       }
     }
-    if ((patchKey === "storyPoints" || patchKey === "estHours") && v !== (task as Record<string, unknown>)[patchKey]) {
+    if (patchKey === "estHours" && v !== (task as Record<string, unknown>)[patchKey]) {
       if (!canDo(membership.perms, "edit_estimates") && !(canDo(membership.perms, "edit_task_own") && ownTask)) {
         throw new Error("Role cannot change estimates on this task.");
       }
@@ -421,8 +516,8 @@ export async function updateTask(client: PrismaClient, ctx: TaskContext, taskId:
 
   // build update
   const scalars: Record<string, keyof TaskPatch> = {
-    title: "title", description: "description", typeId: "typeId", storyId: "storyId",
-    epicId: "epicId", storyPoints: "storyPoints", estHours: "estHours",
+    title: "title", description: "description", typeId: "typeId",
+    epicId: "epicId", estHours: "estHours",
     rdTime: "rdTime", loggedHours: "loggedHours", priorityId: "priorityId", statusId: "statusId",
     assigneeId: "assigneeId", testedById: "testedById", gitBranch: "gitBranch", position: "position",
   };
@@ -482,6 +577,14 @@ export async function updateTask(client: PrismaClient, ctx: TaskContext, taskId:
   // NONE, record the Done time on FINAL) and the project-completion recompute
   // all run in ONE transaction; realtime events fire only after the commit.
   const now = new Date();
+  // PHASE 4: keep the "assigned by" snapshot in step with the assignee.
+  // Reassigning stores the CURRENT user + timestamp; unassigning clears the
+  // snapshot (the UI shows "—") while the full history stays in Activity rows.
+  if (changes.assigneeId) {
+    const toId = (changes.assigneeId.after as string | null) ?? null;
+    data.assignedById = toId ? userId : null;
+    data.assignedAt = toId ? now : null;
+  }
   const result = await client.$transaction(async (tx) => {
     if (targetStatus) {
       const timerData = await stageTransitionData(tx, task, targetStatus, now);
@@ -495,12 +598,25 @@ export async function updateTask(client: PrismaClient, ctx: TaskContext, taskId:
   if (!result) return fullTaskRow(client, ctx, task.id);
   const { updated, completion } = result;
   for (const [field, diff] of Object.entries(changes)) {
+    // PHASE 4: an assignee change is its own history event ("assigned"/
+    // "unassigned"), not a generic field edit — feeds render it with names.
+    const assignEvent = field === "assigneeId";
     await client.activity.create({
       data: {
-        taskId: task.id, actorId: userId, action: "task.updated", field,
+        taskId: task.id, actorId: userId,
+        action: assignEvent ? "task.assigned" : "task.updated", field,
         before: diff.before == null ? null : String(diff.before)?.slice(0, 500),
         after: diff.after == null ? null : String(diff.after)?.slice(0, 500),
       },
+    });
+  }
+  if (changes.assigneeId) {
+    // PHASE 4: assigning is manager-relevant enough for the Audit Log (the
+    // audit page's entity label already resolves task keys).
+    await audit(client, {
+      actorId: userId, action: "task.assign", entity: "task", entityId: task.id,
+      meta: { from: changes.assigneeId.before ?? null, to: changes.assigneeId.after ?? null },
+      ip: ctx.ip,
     });
   }
 
@@ -553,10 +669,16 @@ export async function deleteTask(client: PrismaClient, ctx: TaskContext, taskId:
   const completion = await client.$transaction(async (tx) => {
     await tx.task.delete({ where: { id: taskId } });
     await tx.auditLog.create({
-      data: { actorId: userId, action: "task.delete", entity: "task", entityId: taskId, meta: JSON.stringify({ title: task.title }) },
+      data: {
+        actorId: userId, action: "task.delete", entity: "task", entityId: taskId,
+        meta: JSON.stringify({ title: task.title }), ip: ctx.ip ?? null,
+      },
     });
     return recomputeProjectCompletion(tx, projectId);
   });
+  // PHASE 6a: this row is written through the raw transaction client, so the
+  // inline prune of `audit()` never runs — do it here, after commit (best-effort).
+  await pruneAuditLog(client);
   publish(projectId, "task_deleted", { id: taskId });
   // Deleting the last open task may complete the project; deleting all tasks
   // keeps it active (0 tasks never counts as completed).
@@ -564,9 +686,10 @@ export async function deleteTask(client: PrismaClient, ctx: TaskContext, taskId:
 }
 
 export function ctxFromLoad(
-  project: { id: string; key: string; hoursPerDay: number; pointScale: number[] },
+  project: { id: string; key: string; hoursPerDay: number },
   membership: Membership,
   userId: string,
+  ip?: string,
 ): TaskContext {
-  return { projectId: project.id, projectKey: project.key, hoursPerDay: project.hoursPerDay, pointScale: project.pointScale, membership, userId };
+  return { projectId: project.id, projectKey: project.key, hoursPerDay: project.hoursPerDay, membership, userId, ip };
 }

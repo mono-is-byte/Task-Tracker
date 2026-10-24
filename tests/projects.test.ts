@@ -15,8 +15,8 @@ let n = 0;
 const uniq = (p: string) => `${p}-${Date.now()}-${n++}`;
 
 let fx: {
-  A: { id: string; key: string; hoursPerDay: number; pointScale: number[] };
-  B: { id: string; key: string; hoursPerDay: number; pointScale: number[] };
+  A: { id: string; key: string; hoursPerDay: number };
+  B: { id: string; key: string; hoursPerDay: number };
   S: Record<string, string>;
   users: Record<string, string>;
 };
@@ -31,14 +31,16 @@ beforeAll(async () => {
   await db.$connect();
   const roles: Record<string, string> = {};
   for (const [name, def] of Object.entries(DEFAULT_ROLES)) {
-    // test DBs persist between runs — reuse the fixture role instead of re-creating it
-    const existing = await db.role.findUnique({ where: { name: `P-${name}` } });
-    const r = existing ?? (await db.role.create({
-      data: {
+    // test DBs persist between runs — always refresh the role definition so a
+    // changed DEFAULT_ROLES (e.g. the new bypass_transitions flag) is applied.
+    const r = await db.role.upsert({
+      where: { name: `P-${name}` },
+      update: { permissions: JSON.stringify(def.permissions), fieldRules: JSON.stringify(def.fieldRules) },
+      create: {
         name: `P-${name}`, description: def.description,
         permissions: JSON.stringify(def.permissions), fieldRules: JSON.stringify(def.fieldRules),
       },
-    }));
+    });
     roles[name] = r.id;
   }
 
@@ -72,8 +74,8 @@ beforeAll(async () => {
   });
 
   fx = {
-    A: { id: A.id, key: A.key, hoursPerDay: 8, pointScale: [1, 2, 3, 5, 8, 13, 21] },
-    B: { id: B.id, key: B.key, hoursPerDay: 8, pointScale: [1, 2, 3, 5, 8, 13, 21] },
+    A: { id: A.id, key: A.key, hoursPerDay: 8 },
+    B: { id: B.id, key: B.key, hoursPerDay: 8 },
     S: { todo: todo.id, prog: prog.id, done: done.id },
     users,
   };
@@ -113,7 +115,8 @@ describe("removeStatus — Kanban column removal (Phase 3)", () => {
       data: { projectId: fx.A.id, name: "Review", category: "inprogress", color: "#f80", position: 3 },
     });
     await db.statusTransition.create({ data: { projectId: fx.A.id, fromId: fx.S.todo, toId: st.id, roleIds: "[]" } });
-    await db.statusDesignationTag.create({ data: { statusId: st.id, text: uniq("designer") } });
+    const anyRole = await db.role.findFirstOrThrow({ where: { name: { startsWith: "P-" } } });
+    await db.statusDesignationTag.create({ data: { statusId: st.id, roleId: anyRole.id } });
 
     const res = await removeStatus(db, pm, st.id, fx.S.prog);
     expect(res).toEqual({ deleted: true, moved: 0 });
@@ -171,7 +174,7 @@ describe("project completion flag (Phase 2)", () => {
     await db.projectMember.create({ data: { projectId: proj.id, userId: fx.users.pm, roles: { create: [{ roleId: pmRole.id }] } } });
     const m = (await getMembership(db, fx.users.pm, false, proj.id))!;
     const ctx = ctxFromLoad(
-      { id: proj.id, key: proj.key, hoursPerDay: 8, pointScale: [1, 2, 3, 5, 8, 13, 21] }, m, fx.users.pm,
+      { id: proj.id, key: proj.key, hoursPerDay: 8 }, m, fx.users.pm,
     );
     const completed = async () => (await db.project.findUniqueOrThrow({ where: { id: proj.id } })).isCompleted;
     return { proj, todo, done, ctx, completed };

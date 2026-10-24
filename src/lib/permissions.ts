@@ -20,6 +20,14 @@ export const ACTIONS = [
   "manage_members",
   "manage_archive",
   "comment",
+  /**
+   * Phase 1: the ONLY workflow bypass flag. A role holding it may move a task
+   * to any status, ignoring the project's StatusTransition matrix. Set true
+   * only for Project Manager. Deliberately a separate permission from
+   * `manage_workflow` / `manage_archive` so editing the workflow definition does
+   * not silently grant the right to bypass it.
+   */
+  "bypass_transitions",
 ] as const;
 
 export type Action = (typeof ACTIONS)[number];
@@ -31,7 +39,6 @@ export const TASK_FIELDS = [
   "title",
   "description",
   "type",
-  "storyPoints",
   "estHours",
   "rdTime",
   "loggedHours",
@@ -44,7 +51,6 @@ export const TASK_FIELDS = [
   "gitBranch",
   "labels",
   "epic",
-  "story",
   "dependency",
   "remarks",
   "feedback",
@@ -71,6 +77,7 @@ export const DEFAULT_ROLES: Record<string, RoleDef> = {
       assign: true, manage_epics: true, manage_fields: true,
       manage_workflow: true, manage_automation: true, view_reports: true, export: true,
       import: true, manage_members: true, manage_archive: true, comment: true,
+      bypass_transitions: true,
     },
     fieldRules: { ...allFields("editable") },
   },
@@ -114,9 +121,22 @@ export function parsePerms(json: string | null | undefined): Perms {
   }
 }
 
+/**
+ * Parse stored field rules defensively. Phase 11 removed the `story` field; old
+ * rows (or old clients) may still contain it, so unknown keys are dropped here
+ * instead of reaching the role editor or a mutation check. `custom:*` covers
+ * both the wildcard and per-custom-field keys.
+ */
 export function parseFieldRules(json: string | null | undefined): FieldRuleMap {
   try {
-    return json ? (JSON.parse(json) as FieldRuleMap) : {};
+    const parsed = json ? (JSON.parse(json) as Record<string, unknown>) : {};
+    const known = new Set<string>([...TASK_FIELDS, "custom:*"]);
+    const out: FieldRuleMap = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (!known.has(key) && !key.startsWith("custom:")) continue;
+      if (value === "hidden" || value === "readonly" || value === "editable") out[key] = value;
+    }
+    return out;
   } catch {
     return {};
   }
@@ -124,6 +144,20 @@ export function parseFieldRules(json: string | null | undefined): FieldRuleMap {
 
 export function canDo(perms: Perms, action: Action): boolean {
   return perms[action] === true;
+}
+
+/**
+ * Phase 1 (role = designation): the single, explicit workflow-bypass check.
+ *
+ * Only a Super Admin, or a user whose project role carries the
+ * `bypass_transitions` permission flag, may move a task to ANY status. This is
+ * intentionally NOT derived from `manage_workflow`, `manage_archive`, a role
+ * NAME ("Project Manager"), or the user's designation text — those must never
+ * grant a bypass (a Developer with `manage_workflow` is still bound by the
+ * transition matrix, and renaming a role must not change permissions).
+ */
+export function canBypassTransitions(m: Pick<Membership, "isSuperAdmin" | "perms">): boolean {
+  return m.isSuperAdmin || m.perms.bypass_transitions === true;
 }
 
 export function fieldRule(rules: FieldRuleMap, field: string): FieldRule {
@@ -223,23 +257,6 @@ export function isTransitionAllowed(
   if (t.roleIds.length > 0 && !t.roleIds.some((r) => held.includes(r))) return false;
   if (t.issueTypeIds.length > 0 && issueTypeId && !t.issueTypeIds.includes(issueTypeId)) return false;
   return true;
-}
-
-export async function getAllowedTransitions(
-  client: PrismaClient,
-  projectId: string,
-  fromId: string,
-  roleIds: string | string[],
-  isSuperAdmin: boolean,
-  issueTypeId?: string | null,
-) {
-  const all = await client.statusTransition.findMany({ where: { projectId, fromId } });
-  return all.filter((t) =>
-    isTransitionAllowed(
-      { fromId: t.fromId, toId: t.toId, roleIds: safeArr(t.roleIds), issueTypeIds: safeArr(t.issueTypeIds) },
-      roleIds, isSuperAdmin, issueTypeId,
-    ),
-  );
 }
 
 /** True when the user holds `action` in at least one project (union of that project's roles).

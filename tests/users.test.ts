@@ -24,6 +24,8 @@ import {
   validateAvatarUpload,
 } from "../src/lib/avatar";
 import { designationCounts } from "../src/lib/roles";
+import { changeUsername } from "../src/lib/auth";
+import { GENDERS, isGender, usernameProblems } from "../src/lib/accountRules";
 
 const TEST_URL = "file:./tests/test-users.db";
 const db = makeTestClient(TEST_URL);
@@ -32,8 +34,8 @@ let n = 0;
 const uniq = (p: string) => `${p}-${Date.now()}-${n++}`;
 
 let fx: {
-  A: { id: string; key: string; hoursPerDay: number; pointScale: number[] };
-  B: { id: string; key: string; hoursPerDay: number; pointScale: number[] };
+  A: { id: string; key: string; hoursPerDay: number };
+  B: { id: string; key: string; hoursPerDay: number };
   S: Record<string, string>;
   users: Record<string, string>; // admin, pm, dev, outsider
 };
@@ -62,15 +64,17 @@ beforeAll(async () => {
   await db.$connect();
   const roles: Record<string, string> = {};
   for (const [name, def] of Object.entries(DEFAULT_ROLES)) {
-    const existing = await db.role.findUnique({ where: { name: `U-${name}` } });
-    const r = existing ?? (await db.role.create({
-      data: {
+    // test DBs persist between runs — refresh so DEFAULT_ROLES changes apply.
+    const r = await db.role.upsert({
+      where: { name: `U-${name}` },
+      update: { permissions: JSON.stringify(def.permissions), fieldRules: JSON.stringify(def.fieldRules) },
+      create: {
         name: `U-${name}`,
         description: def.description,
         permissions: JSON.stringify(def.permissions),
         fieldRules: JSON.stringify(def.fieldRules),
       },
-    }));
+    });
     roles[name] = r.id;
   }
 
@@ -93,8 +97,8 @@ beforeAll(async () => {
   await db.projectMember.create({ data: { projectId: B.id, userId: outsider, roles: { create: [{ roleId: roles["Developer"] }] } } });
 
   fx = {
-    A: { id: A.id, key: A.key, hoursPerDay: 8, pointScale: [1, 2, 3, 5, 8, 13, 21] },
-    B: { id: B.id, key: B.key, hoursPerDay: 8, pointScale: [1, 2, 3, 5, 8, 13, 21] },
+    A: { id: A.id, key: A.key, hoursPerDay: 8 },
+    B: { id: B.id, key: B.key, hoursPerDay: 8 },
     S: { todo: todo.id, prog: prog.id },
     users: { admin, pm, dev, outsider },
   };
@@ -158,6 +162,20 @@ describe("updateManagedUser rules (Phase 4)", () => {
     expect(selfDown.ok).toBe(false);
     const selfDemote = await updateManagedUser(db, admin, fx.users.admin, { isSuperAdmin: false });
     expect(selfDemote.ok).toBe(false);
+  });
+
+  it("a save that changes nothing writes no audit row (PHASE 6b)", async () => {
+    const admin = { id: fx.users.admin, isSuperAdmin: true };
+    const target = await makeUser("noop"); // fresh id → no prior audit rows
+    const row = await db.user.findUniqueOrThrow({ where: { id: target } });
+    const same = await updateManagedUser(db, admin, target, { name: row.name, gender: row.gender });
+    expect(same.ok).toBe(true);
+    if (same.ok) expect(same.user.name).toBe(row.name);
+    expect(await db.auditLog.count({ where: { action: "user.update", entityId: target } })).toBe(0);
+    // …while a real change still writes exactly one row.
+    const changed = await updateManagedUser(db, admin, target, { name: `${row.name}-renamed` });
+    expect(changed.ok).toBe(true);
+    expect(await db.auditLog.count({ where: { action: "user.update", entityId: target } })).toBe(1);
   });
 
   it("the last active Admin can neither be demoted nor deleted", async () => {
@@ -427,5 +445,109 @@ describe("designation counts (Roles & Permissions)", () => {
     expect(counts[role.id]).toBe(2); // u1 + u2, one per user
     const fresh = await db.role.create({ data: { name: uniq("EmptyRole"), permissions: "{}", fieldRules: "{}" } });
     expect(counts[fresh.id] ?? 0).toBe(0);
+  });
+});
+
+/** Change request Phase 2: editable username + optional gender. */
+describe("Phase 2: username change", () => {
+  async function userWithPassword(key: string) {
+    const username = uniq(key).toLowerCase().replace(/[^a-z0-9._-]/g, "");
+    const u = await db.user.create({
+      data: {
+        email: `${uniq(key)}@t.local`,
+        username,
+        name: key,
+        passwordHash: await hashPassword("Demo1234!"),
+        mustChangePassword: false,
+      },
+    });
+    return { id: u.id, username, email: u.email };
+  }
+
+  it("validates the username grammar (length, charset, no spaces, not email-like)", () => {
+    expect(usernameProblems("john.doe")).toEqual([]);
+    expect(usernameProblems("a_b-1")).toEqual([]);
+    expect(usernameProblems("ab").join(" ")).toMatch(/at least/);
+    expect(usernameProblems("a".repeat(31)).join(" ")).toMatch(/at most/);
+    expect(usernameProblems("has space").join(" ")).toMatch(/no spaces/);
+    expect(usernameProblems("bad!char").join(" ")).toMatch(/only letters/);
+    expect(usernameProblems("someone@example.com").join(" ")).toMatch(/email/);
+  });
+
+  it("rejects a wrong password and invalid usernames, and does not change the row", async () => {
+    const u = await userWithPassword("unchanged");
+    const wrong = await changeUsername(db, u.id, { username: "brand.new", password: "nope" });
+    expect(wrong.ok).toBe(false);
+    const invalid = await changeUsername(db, u.id, { username: "no spaces", password: "Demo1234!" });
+    expect(invalid.ok).toBe(false);
+    const after = await db.user.findUniqueOrThrow({ where: { id: u.id } });
+    expect(after.username).toBe(u.username);
+  });
+
+  it("changes the username, lower-cases it, and writes an old→new audit entry", async () => {
+    const u = await userWithPassword("rename");
+    const next = `newname.${Date.now()}`;
+    const res = await changeUsername(db, u.id, { username: next.toUpperCase(), password: "Demo1234!" });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.user.username).toBe(next.toLowerCase());
+    const log = await db.auditLog.findFirst({
+      where: { actorId: u.id, action: "auth.username_change" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(log).not.toBeNull();
+  });
+
+  it("enforces case-insensitive uniqueness against usernames, emails and soft-deleted accounts", async () => {
+    const a = await userWithPassword("clash-a");
+    const b = await userWithPassword("clash-b");
+
+    // Another user's username (case-insensitive).
+    const vsUsername = await changeUsername(db, a.id, { username: b.username.toUpperCase(), password: "Demo1234!" });
+    expect(vsUsername.ok).toBe(false);
+
+    // Another user's EMAIL (login matches either identifier).
+    const vsEmail = await changeUsername(db, a.id, { username: b.email, password: "Demo1234!" });
+    expect(vsEmail.ok).toBe(false);
+
+    // A SOFT-DELETED account still reserves its login name.
+    const gone = await userWithPassword("gone");
+    await db.user.update({ where: { id: gone.id }, data: { deletedAt: new Date() } });
+    const vsDeleted = await changeUsername(db, a.id, { username: gone.username, password: "Demo1234!" });
+    expect(vsDeleted.ok).toBe(false);
+  });
+
+  it("rate-limits self-service renames to a handful per day", async () => {
+    const u = await userWithPassword("ratelimit");
+    let limited = false;
+    for (let i = 0; i < 12; i++) {
+      const r = await changeUsername(db, u.id, { username: `rl.${Date.now()}.${i}`, password: "Demo1234!" });
+      if (!r.ok && r.code === "rate_limit") { limited = true; break; }
+    }
+    expect(limited).toBe(true);
+  });
+});
+
+describe("Phase 2: gender options", () => {
+  it("exposes exactly the four allowed values and validates them", () => {
+    expect([...GENDERS]).toEqual(["Male", "Female", "Other", "Prefer not to say"]);
+    expect(isGender("Male")).toBe(true);
+    expect(isGender("Prefer not to say")).toBe(true);
+    expect(isGender("Non-binary")).toBe(false);
+    expect(isGender(undefined)).toBe(false);
+  });
+
+  it("stores gender via updateManagedUser and clears it with an empty value", async () => {
+    const u = await makeUser("gender");
+    const set = await updateManagedUser(
+      db, { id: fx.users.admin, isSuperAdmin: true }, u, { gender: "Female" },
+    );
+    expect(set.ok).toBe(true);
+    expect((await db.user.findUniqueOrThrow({ where: { id: u } })).gender).toBe("Female");
+
+    const clear = await updateManagedUser(
+      db, { id: fx.users.admin, isSuperAdmin: true }, u, { gender: null },
+    );
+    expect(clear.ok).toBe(true);
+    expect((await db.user.findUniqueOrThrow({ where: { id: u } })).gender).toBeNull();
   });
 });

@@ -5,8 +5,10 @@ import { updateTask, type TaskContext } from "./tasks";
  * Phase 3 (server-only): removing a Kanban column (status) that still holds tasks.
  * The caller must hold `manage_workflow` (Admin/PM) — enforced by the route.
  * Tasks are moved one by one via `updateTask`, so activity, notifications and
- * automations behave exactly like a normal status change; the manager level
- * bypasses forward-only / transition-matrix rules, so any target status is allowed.
+ * automations behave exactly like a normal status change. Phase 1: each move is
+ * subject to the SAME transition rules as a manual move — only a user with the
+ * `bypass_transitions` flag (Project Manager / Super Admin) can relocate tasks
+ * through an otherwise-unconfigured pair.
  */
 
 export interface RemoveStatusResult {

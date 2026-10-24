@@ -6,14 +6,16 @@ import { api } from "@/lib/client";
 export interface Lookups {
   project: {
     id: string; key: string; name: string; description: string | null;
-    hoursPerDay: number; workingDays: number[]; pointScale: number[];
+    hoursPerDay: number; workingDays: number[];
     bannerNote: string | null; settings: Record<string, unknown>; isHidden: boolean;
   };
   membership: {
     userId: string; roleIds: string[]; roleNames: string[]; roleName: string;
     perms: Record<string, boolean>; fieldRules: Record<string, string>; isSuperAdmin: boolean;
   };
-  statuses: { id: string; name: string; category: string; color: string; position: number; designationTags: string[] }[];
+  statuses: { id: string; name: string; category: string; color: string; position: number; designationRoleIds: string[] }[];
+  /** The project's configured transitions (the board greys out invalid drops). */
+  transitions: { fromId: string; toId: string; roleIds: string[]; issueTypeIds: string[] }[];
   priorities: { id: string; name: string; level: number; color: string }[];
   issueTypes: { id: string; name: string; color: string }[];
   /** Every valid (non-deleted) user — assignee/tester pickers show the whole

@@ -9,7 +9,6 @@ interface Role {
   permissions: Record<string, boolean>;
   fieldRules: Record<string, string>;
   isSystem: boolean;
-  /** Unique, non-deleted users whose designation is this role (server-computed). */
   users: number;
 }
 
@@ -46,8 +45,6 @@ export default function AdminRolesPage() {
       }),
     });
     const j = await res.json();
-    // A rename updates every user's designation automatically — those
-    // reference this role by id, never a copied string.
     setMsg(res.ok ? "Role saved." : (j.error?.message ?? "Failed."));
     setEditing(null);
     load();
@@ -66,6 +63,18 @@ export default function AdminRolesPage() {
     load();
   }
 
+  async function requestDelete(role: Role) {
+    if (!window.confirm(`Delete role "${role.name}"? This cannot be undone.`)) return;
+    const res = await fetch(`/api/admin/roles/${role.id}`, { method: "DELETE" });
+    const j = await res.json();
+    if (res.ok) {
+      setMsg("Role deleted.");
+      load();
+    } else {
+      setMsg(j.error?.message ?? "Failed.");
+    }
+  }
+
   return (
     <div>
       <h1 className="mb-4 text-2xl font-bold">Roles & Permissions</h1>
@@ -81,13 +90,11 @@ export default function AdminRolesPage() {
             <div className="flex items-center gap-2">
               <strong>{r.name}</strong>
               {r.isSystem && <span className="rounded bg-slate-200 px-1 text-xs dark:bg-slate-700">system</span>}
-              <span
-                className="rounded bg-line/60 px-1.5 py-0.5 text-xs text-muted"
-                title={`${r.users} unique user${r.users === 1 ? "" : "s"} with this designation (set on the Users page)`}
-              >
+              <span className="rounded bg-line/60 px-1.5 py-0.5 text-xs text-muted">
                 {r.users} user{r.users === 1 ? "" : "s"}
               </span>
               <button onClick={() => setEditing(r)} className="ml-auto rounded border px-2 py-0.5 text-xs">Edit</button>
+              <button onClick={() => requestDelete(r)} className="rounded border border-red-300 px-2 py-0.5 text-xs text-red-600">Delete</button>
             </div>
             <p className="text-xs text-slate-500">{r.description}</p>
           </div>

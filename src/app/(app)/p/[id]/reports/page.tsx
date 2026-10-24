@@ -11,7 +11,7 @@ import { IconDownload } from "@/components/icons";
 
 interface RTask {
   id: string; key: string; title: string; serial: number;
-  storyPoints: number | null; estHours: number | null; loggedHours: number; rdTime: number;
+  estHours: number | null; loggedHours: number; rdTime: number;
   statusId: string; status: { name: string; color: string; category: string };
   priority: { name: string };
   assignee: { name: string } | null; assigneeId: string | null;
@@ -40,12 +40,11 @@ export default function ReportsPage() {
   }, [lookups, tasks]);
 
   const perAssignee = useMemo(() => {
-    const map = new Map<string, { pts: number; hrs: number; n: number }>();
+    const map = new Map<string, { hrs: number; n: number }>();
     for (const t of tasks) {
       if (t.status?.category === "done") continue;
       const name = t.assignee?.name ?? "(unassigned)";
-      const cur = map.get(name) ?? { pts: 0, hrs: 0, n: 0 };
-      cur.pts += t.storyPoints ?? 0;
+      const cur = map.get(name) ?? { hrs: 0, n: 0 };
       cur.hrs += t.estHours ?? 0;
       cur.n += 1;
       map.set(name, cur);
@@ -84,13 +83,12 @@ export default function ReportsPage() {
           open: tasks.length - done,
           done,
           overdue: overdue.length,
-          points: Math.round(tasks.reduce((a, t) => a + (t.storyPoints ?? 0), 0) * 100) / 100,
           est: estVsActual.est,
           logged: estVsActual.logged,
           rd: estVsActual.rd,
         },
         statusDist: statusDist.map((s) => ({ name: s.name, count: s.count, color: s.color })),
-        perAssignee: perAssignee.map(([name, v]) => ({ name, n: v.n, pts: v.pts, hrs: v.hrs })),
+        perAssignee: perAssignee.map(([name, v]) => ({ name, n: v.n, hrs: v.hrs })),
         perTester: qaGroups.map((g) => ({ name: g.tester, n: g.count })),
         overdue: overdue.map((t) => ({ key: t.key, title: t.title, endDate: t.endDate })),
       });
@@ -122,7 +120,7 @@ export default function ReportsPage() {
 
       <section className={SECTION}>
         <h3 className="mb-2 font-bold">Open tasks per assignee</h3>
-        {perAssignee.map(([name, v]) => <StatBar key={name} label={`${name} (${v.pts}p/${v.hrs}h)`} value={v.n} max={maxV} color="#3b82f6" />)}
+        {perAssignee.map(([name, v]) => <StatBar key={name} label={`${name} (${v.hrs}h)`} value={v.n} max={maxV} color="#3b82f6" />)}
       </section>
 
       <section className={SECTION} aria-labelledby="qa-queue-heading">

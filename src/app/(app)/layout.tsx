@@ -2,6 +2,7 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { listProjectsForUser, requireViewer } from "@/lib/server";
 import { mergeRoles } from "@/lib/permissions";
+import { designationLabel } from "@/lib/designation";
 import SidebarProjects from "@/components/SidebarProjects";
 import ThemeToggle from "@/components/ThemeToggle";
 import ThemeSync from "@/components/ThemeSync";
@@ -15,6 +16,9 @@ import { IconAuditLog, IconCalendar, IconHome, IconKey, IconUser, IconUsers } fr
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { user } = await requireViewer("/");
   const projects = await listProjectsForUser(user.id, user.isSuperAdmin);
+  // Phase 2 (role = designation): the sidebar shows the LIVE name of the primary
+  // role (never a hard-coded label). "No role" when none is set.
+  const roleLabel = await designationLabel(db, user);
 
   // Change request Phase 2: per-project Admin/PM flags (manage_members) decide
   // the sidebar's Rename/Delete menu; the "+" project creator appears when the
@@ -53,7 +57,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <SidebarToggle />
       {/* Phase 6: the sidebar is sticky + scrolls on its own, so navigation
           stays reachable while long pages scroll. */}
-      <aside id="app-sidebar" className="sb-aside sticky top-0 flex h-screen w-52 shrink-0 flex-col overflow-y-auto border-r border-line bg-surface p-3">
+      <aside id="app-sidebar" className="sb-aside glass sticky top-0 flex h-screen w-52 shrink-0 flex-col overflow-y-auto border-r border-line p-3">
         <Link href="/" className="sb-logo mb-4 px-2 text-lg font-bold tracking-tight text-accent">
           TaskTracker
         </Link>
@@ -79,10 +83,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           )}
         </nav>
         <div className="sb-foot mt-auto border-t border-line pt-2 text-xs">
-          <div className="sb-user mb-1 flex items-center justify-between rounded-lg bg-canvas px-2 py-1.5">
+          <div className="sb-user glass-soft mb-1 flex items-center justify-between rounded-lg px-2 py-1.5">
             <span className="flex min-w-0 items-center gap-1.5">
               <Avatar name={user.name} url={user.avatarUrl} size={22} />
-              <span className="sb-label truncate font-semibold" title={user.email}>{user.name}</span>
+              <span className="flex min-w-0 flex-col">
+                <span className="sb-label truncate font-semibold" title={user.email}>{user.name}</span>
+                <span className="sb-label truncate text-[10px] text-muted" title={roleLabel}>{roleLabel}</span>
+              </span>
             </span>
             <NotificationsBell />
           </div>

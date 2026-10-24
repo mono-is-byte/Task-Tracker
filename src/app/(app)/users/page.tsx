@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/client";
+import { GENDERS } from "@/lib/accountRules";
 import Avatar from "@/components/Avatar";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { IconPlus } from "@/components/icons";
@@ -27,6 +28,8 @@ interface U {
   id: string; email: string; username: string; name: string;
   active: boolean; isSuperAdmin: boolean; mustChangePassword: boolean;
   lockedUntil: string | null; avatarUrl: string | null;
+  /** Change request Phase 2: optional gender (null when not set). */
+  gender: string | null;
   /** Role id (the stored designation), null when none / role deleted. */
   designation: string | null;
   /** Live role name for display (follows renames). */
@@ -50,12 +53,13 @@ export default function UsersPage() {
   const [busy, setBusy] = useState("");
 
   const [showAdd, setShowAdd] = useState(false);
-  const [addForm, setAddForm] = useState({ email: "", username: "", name: "", designation: "", isSuperAdmin: false });
+  const [addForm, setAddForm] = useState({ email: "", username: "", name: "", designation: "", gender: "", isSuperAdmin: false });
 
   const [editing, setEditing] = useState<U | null>(null);
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [editDesignation, setEditDesignation] = useState("");
+  const [editGender, setEditGender] = useState("");
 
   // Step 2: "View projects" modal.
   const [projectsOf, setProjectsOf] = useState<U | null>(null);
@@ -93,12 +97,12 @@ export default function UsersPage() {
     try {
       const res = await fetch("/api/users", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...addForm, designation: addForm.designation || null }),
+        body: JSON.stringify({ ...addForm, designation: addForm.designation || null, gender: addForm.gender || null }),
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error?.message ?? "Failed to create user.");
       setLastTemp(`Temp password for ${addForm.email}: ${j.data.tempPassword}`);
-      setAddForm({ email: "", username: "", name: "", designation: "", isSuperAdmin: false });
+      setAddForm({ email: "", username: "", name: "", designation: "", gender: "", isSuperAdmin: false });
       setShowAdd(false);
       load();
     } catch (e2) {
@@ -229,6 +233,16 @@ export default function UsersPage() {
               ))}
             </select>
           </label>
+          <label className="text-xs">Gender
+            <select
+              value={addForm.gender}
+              onChange={(e) => setAddForm({ ...addForm, gender: e.target.value })}
+              className={`${inp} mt-1 block`}
+            >
+              <option value="">— not set —</option>
+              {GENDERS.map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </label>
           <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={addForm.isSuperAdmin} onChange={(e) => setAddForm({ ...addForm, isSuperAdmin: e.target.checked })} /> Super Admin</label>
           <button disabled={busy === "create"} className="rounded bg-indigo-600 px-3 py-1 text-sm font-semibold text-white disabled:opacity-50">Create user</button>
         </form>
@@ -264,6 +278,7 @@ export default function UsersPage() {
                         {u.mustChangePassword && <span className="rounded bg-amber-100 px-1 text-[10px] dark:bg-amber-950">temp-pw</span>}
                         {!u.active && <span className="rounded bg-red-100 px-1 text-[10px] dark:bg-red-950">inactive</span>}
                         {u.lockedUntil && new Date(u.lockedUntil) > new Date() && <span className="rounded bg-red-100 px-1 text-[10px] dark:bg-red-950">locked</span>}
+                        {u.gender && <span className="rounded bg-sky-100 px-1 text-[10px] dark:bg-sky-950">{u.gender}</span>}
                         <span className="truncate">{u.email} · @{u.username}</span>
                       </div>
                     </div>
@@ -297,7 +312,7 @@ export default function UsersPage() {
                 </td>
                 <td className="p-2">
                   <div className="flex flex-wrap gap-1">
-                    <button onClick={() => { setEditing(u); setEditName(u.name); setEditEmail(u.email); setEditDesignation(u.designation ?? ""); }} className={btn}>Edit</button>
+                    <button onClick={() => { setEditing(u); setEditName(u.name); setEditEmail(u.email); setEditDesignation(u.designation ?? ""); setEditGender(u.gender ?? ""); }} className={btn}>Edit</button>
                     {isAdmin && (
                       <>
                         <button onClick={() => void resetPw(u)} disabled={busy === u.id + "pw"} className={btn}>Reset pw</button>
@@ -321,13 +336,19 @@ export default function UsersPage() {
       {/* Edit user: name, email (Admin only), avatar upload (.jpg/.jpeg, <= 2 MB) */}
       {editing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEditing(null)}>
-          <div role="dialog" aria-label={`Edit ${editing.name}`} className="w-full max-w-md rounded-lg border border-line bg-surface p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div role="dialog" aria-label={`Edit ${editing.name}`} className="glass-strong w-full max-w-md rounded-lg border border-line p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="mb-3 font-semibold">Edit user — {editing.name}</h3>
             <label className="mb-2 block text-xs text-slate-500">Name
               <input value={editName} onChange={(e) => setEditName(e.target.value)} className={`${inp} mt-0.5 block w-full`} />
             </label>
             <label className="mb-3 block text-xs text-slate-500">Email {!isAdmin && "(Admin only)"}
               <input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} disabled={!isAdmin} className={`${inp} mt-0.5 block w-full disabled:opacity-60`} />
+            </label>
+            <label className="mb-3 block text-xs text-slate-500">Gender
+              <select value={editGender} onChange={(e) => setEditGender(e.target.value)} className={`${inp} mt-0.5 block w-full`}>
+                <option value="">— not set —</option>
+                {GENDERS.map((g) => <option key={g} value={g}>{g}</option>)}
+              </select>
             </label>
             <label className="mb-3 block text-xs text-slate-500">Designation (a role — labels only)
               <select
@@ -367,6 +388,7 @@ export default function UsersPage() {
                   if (isAdmin && editEmail.trim() && editEmail !== editing.email) patch.email = editEmail.trim();
                   const des = editDesignation.trim();
                   if (des !== (editing.designation ?? "")) patch.designation = des || null;
+                  if (editGender !== (editing.gender ?? "")) patch.gender = editGender || null;
                   setEditing(null);
                   if (Object.keys(patch).length > 0) void patchUser(editing, patch, "edit");
                 }}
@@ -382,7 +404,7 @@ export default function UsersPage() {
       {/* Step 2: Assigned / Solved projects for the selected user. */}
       {projectsOf && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setProjectsOf(null)}>
-          <div role="dialog" aria-label={`Projects for ${projectsOf.name}`} className="max-h-[85vh] w-full max-w-lg overflow-auto rounded-lg border border-line bg-surface p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div role="dialog" aria-label={`Projects for ${projectsOf.name}`} className="glass-strong max-h-[85vh] w-full max-w-lg overflow-auto rounded-lg border border-line p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="mb-1 font-semibold">Projects — {projectsOf.name}</h3>
             <p className="mb-3 text-xs text-slate-500">Based on the tasks currently assigned to this user.</p>
 

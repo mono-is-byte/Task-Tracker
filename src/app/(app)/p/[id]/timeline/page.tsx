@@ -21,7 +21,6 @@ type TTask = TaskRow & {
   status: { name: string; color: string; category: string; timerRole: string };
   assignee: { name: string } | null;
   epic: { id: string; name: string } | null;
-  story: { id: string; title: string } | null;
 };
 
 /** The fixed detail columns left of the schedule (Task … Logged). */
@@ -119,8 +118,7 @@ export default function TimelinePage() {
     for (const d of days) {
       const t = d.task;
       const name =
-        group === "epic" ? (t.epic?.name ?? "(no project name)") :
-        group === "story" ? (t.story?.title ?? "(no parent story)") :
+        group === "epic" ? (t.epic?.name ?? "(no epic)") :
         group === "assignee" ? (t.assignee?.name ?? "(unassigned)") :
         t.status.name;
       const arr = map.get(name) ?? [];
@@ -137,8 +135,7 @@ export default function TimelinePage() {
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
         <h2 className="tt-title">Timeline</h2>
         <select value={group} onChange={(e) => setGroup(e.target.value)} className="rounded border p-1 dark:border-slate-700 dark:bg-slate-800" aria-label="Group timeline rows">
-          <option value="epic">Group: Project Name</option>
-          <option value="story">Group: Parent story</option>
+          <option value="epic">Group: Epic</option>
           <option value="assignee">Group: Assignee</option>
           <option value="status">Group: Status</option>
         </select>

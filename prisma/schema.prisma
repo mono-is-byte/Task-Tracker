@@ -28,6 +28,10 @@ model User {
   /// The stored value is the Role id; every display resolves the role's current
   /// name live, so renaming a role updates every user's designation at once.
   designation        String?
+  /// Change request Phase 2: optional gender. Free column on purpose (SQLite +
+  /// zod validation keeps the four allowed options: Male / Female / Other /
+  /// Prefer not to say) so the value can be extended without a migration.
+  gender             String?
   hoursPerDay        Float?
   lastActiveAt       DateTime?
   createdAt          DateTime  @default(now())
@@ -36,6 +40,8 @@ model User {
   memberships    ProjectMember[]
   assignedTasks  Task[]            @relation("TaskAssignee")
   testedTasks    Task[]            @relation("TaskTester")
+  /** PHASE 4: tasks this user ASSIGNED to someone (the "assigned by" side). */
+  assignedByTasks Task[]           @relation("TaskAssigner")
   sessions       Session[]
   auditLogs      AuditLog[]        @relation("AuditActor")
   comments       Comment[]
@@ -120,19 +126,22 @@ model Role {
   updatedAt   DateTime @updatedAt
 
   memberLinks ProjectMemberRole[]
+  statusDesignationTags StatusDesignationTag[]
 }
 
-/// Step 1: free-text status → designation suggestion. Members whose (free-text)
-/// designation matches one of a status's tags are SUGGESTED first in the
-/// status-change "Assign to" step. Purely a suggestion list — grants nothing.
+/// Phase 1 (role = designation): a status can SUGGEST the project roles that
+/// usually work in it. Stored as role ids (never copied text), so renaming a
+/// role updates every suggestion and deleting a role removes its suggestions.
 model StatusDesignationTag {
   id        String   @id @default(cuid())
   statusId  String
   status    Status   @relation(fields: [statusId], references: [id], onDelete: Cascade)
-  text      String
+  roleId    String
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
-  @@unique([statusId, text])
+  @@unique([statusId, roleId])
+  @@index([roleId])
 }
 
 // ---------- Projects ----------
@@ -143,7 +152,6 @@ model Project {
   description String?
   hoursPerDay Float    @default(8)
   workingDays String   @default("[1,2,3,4,5]")
-  pointScale  String   @default("[1,2,3,5,8,13,21]")
   bannerNote  String?
   settings    String   @default("{}")
   /// Phase 3: hidden projects are excluded from default project lists
@@ -162,8 +170,6 @@ model Project {
   priorities     Priority[]
   issueTypes     IssueType[]
   epics          Epic[]
-  sprints        Sprint[]
-  stories        Story[]
   tasks          Task[]
   customFields   CustomField[]
   automationRules AutomationRule[]
@@ -269,44 +275,7 @@ model Epic {
   status      String   @default("open")
   position    Int      @default(0)
 
-  stories Story[]
   tasks   Task[]
-}
-
-model Sprint {
-  id            String    @id @default(cuid())
-  projectId     String
-  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  key           String
-  goal          String    @default("")
-  status        String    @default("planned")
-  startDate     DateTime?
-  endDate       DateTime?
-  capacityHours Float?
-  createdAt     DateTime  @default(now())
-
-  stories Story[]
-  tasks   Task[]
-
-  @@unique([projectId, key])
-}
-
-model Story {
-  id          String   @id @default(cuid())
-  projectId   String
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  epicId      String?
-  epic        Epic?    @relation(fields: [epicId], references: [id], onDelete: SetNull)
-  sprintId    String?
-  sprint      Sprint?  @relation(fields: [sprintId], references: [id], onDelete: SetNull)
-  title       String
-  description String?
-  status      String   @default("open")
-  position    Int      @default(0)
-
-  tasks Task[]
-
-  @@index([projectId])
 }
 
 model Task {
@@ -316,15 +285,10 @@ model Task {
   serial        Int
   typeId        String?
   type          IssueType? @relation(fields: [typeId], references: [id], onDelete: SetNull)
-  storyId       String?
-  story         Story?    @relation(fields: [storyId], references: [id], onDelete: SetNull)
   epicId        String?
   epic          Epic?     @relation(fields: [epicId], references: [id], onDelete: SetNull)
-  sprintId      String?
-  sprint        Sprint?   @relation(fields: [sprintId], references: [id], onDelete: SetNull)
   title         String
   description   String?
-  storyPoints   Float?
   estHours      Float?
   rdTime        Float     @default(0)
   loggedHours   Float     @default(0)
@@ -334,6 +298,13 @@ model Task {
   status        Status    @relation(fields: [statusId], references: [id])
   assigneeId    String?
   assignee      User?     @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  /// PHASE 4 — "assigned by" tracking. `assignedById`/`assignedAt` are SYSTEM
+  /// fields the server derives from the authenticated session (never accepted
+  /// from the client). They mirror the LATEST assignment; the full history
+  /// (reassign/unassign) lives in `Activity` rows with action "task.assigned".
+  assignedById  String?
+  assignedBy    User?     @relation("TaskAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
+  assignedAt    DateTime?
   testedById    String?
   testedBy      User?     @relation("TaskTester", fields: [testedById], references: [id], onDelete: SetNull)
   startDate     DateTime?
@@ -363,7 +334,8 @@ model Task {
   @@unique([projectId, serial])
   @@index([projectId, statusId])
   @@index([projectId, assigneeId])
-  @@index([projectId, sprintId])
+  // PHASE 4: the Table's "Assigned by" filter queries this pair.
+  @@index([projectId, assignedById])
 }
 
 /** Change request: one row per Start→Stop segment (stage history). */
@@ -415,6 +387,9 @@ model Activity {
   field     String?
   before    String?
   after     String?
+  /// PHASE 4: small JSON extra for an event (e.g. `{"via":"automation:Rule name"}`
+  /// on "task.assigned" rows). Nullable — older rows have no meta.
+  meta      String?
   createdAt DateTime @default(now())
 
   @@index([taskId])

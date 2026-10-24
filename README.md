@@ -1,5 +1,7 @@
 # TaskTracker
 
+> ⚠️ This project is under active development and testing. Use at your own risk.
+
 A self-hosted, multi-user task tracker - a lightweight project management tool for small teams.
 Kanban boards, an inline-editable table, timeline, workload, calendar and reports, with
 per-project roles, field-level permissions, custom workflows and automation.
@@ -12,6 +14,7 @@ per-project roles, field-level permissions, custom workflows and automation.
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
 [![Tests](https://img.shields.io/badge/tests-197_passing-2ea44f?logo=vitest&logoColor=white)](./tests)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520.9-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 ---
 
@@ -276,8 +279,6 @@ cp .env.example .env
 Then open `.env` and set at least:
 
 - `DATABASE_URL` — `file:./dev.db` works out of the box.
-- `SESSION_SECRET` — a long, random string you generate yourself (e.g.
-  `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`).
 
 > 🔒 Never commit `.env`. It is already listed in `.gitignore`; only `.env.example`
 > is tracked. See [Environment Variables](#environment-variables) for the full list.
@@ -319,8 +320,7 @@ accounts for local development only:
 
 - To point the app at your own credentials, create users from **Users** in the app
   (admins issue a one-time temporary password), or edit the seed before running it.
-- Before exposing an instance to a network, change or remove the demo accounts and set a
-  strong `SESSION_SECRET`.
+- Before exposing an instance to a network, change or remove the demo accounts.
 
 ---
 
@@ -331,7 +331,6 @@ accounts for local development only:
 | `DATABASE_URL` | ✅ (local) | `file:./dev.db` for the local SQLite file; the Prisma CLI also reads this for `migrate`/`seed`. |
 | `TURSO_DATABASE_URL` | — | Remote libSQL/Turso URL (`libsql://…`). When set, the running app uses it instead of the local file — required on serverless hosts such as Vercel. |
 | `TURSO_AUTH_TOKEN` | — | Turso database token (`turso db tokens create <db>`); required whenever `TURSO_DATABASE_URL` is remote. |
-| `SESSION_SECRET` | ✅ | Long random string reserved for signing; sessions themselves are opaque, hashed tokens |
 | `APP_URL` | — | Base URL of the app; cookies are marked `Secure` when it starts with `https://` (and always in production) |
 | `SMTP_URL` | — | If set, forgot-password issues a one-hour reset token and writes it to the server log for an operator to deliver; if unset, users are told to ask an admin |
 | `SMTP_FROM` | — | From address intended for mail delivery — not read by the current build, which logs reset tokens instead of sending mail |
@@ -385,8 +384,8 @@ same migrations, same tests:
    then matches your `dev.db` exactly — run `npm run turso:copy-local` with the
    same environment variables.
 4. In **Vercel → Project → Settings → Environment Variables** add:
-   `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `APP_URL` (your `https://…` URL) and
-   `SESSION_SECRET`. Do **not** set `DATABASE_URL` to a file path on Vercel.
+   `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` and `APP_URL` (your `https://…` URL).
+   Do **not** set `DATABASE_URL` to a file path on Vercel.
 5. **Match the regions.** Vercel Functions default to `iad1` (US East), while a Turso
    database lives in one AWS region — every request/query would then cross the world. The
    committed `vercel.json` sets the function region to `bom1` (Mumbai); keep it equal to the
@@ -550,8 +549,8 @@ dashboard aggregation, PDF generation, user management and Bangla-safe search.
 
 - **Never commit `.env`** or any real credentials. The repository tracks only
   `.env.example`, which contains placeholders.
-- Sessions are opaque tokens stored as SHA-256 hashes; `SESSION_SECRET` is the only secret
-  the app needs.
+- Sessions are opaque tokens stored as SHA-256 hashes; no separate signing secret
+  is required.
 - Set `APP_URL` to an `https://` URL in production so cookies are marked `Secure`.
 - Login is rate-limited and locks out after repeated failures; administrators can unlock
   accounts and trigger password resets.
@@ -606,5 +605,10 @@ Please do not commit secrets, `.env` files, or generated databases (`*.db`).
 
 ## License
 
-Declared as **ISC** in [`package.json`](./package.json). A standalone `LICENSE` file is
-not included yet — see the [Roadmap](#roadmap).
+This project is licensed under the MIT License. See the LICENSE file for details.
+
+---
+
+## Disclaimer
+
+This software is provided "as is", without warranty of any kind. It is still being tested and may contain bugs or security issues. You are responsible for reviewing, testing and securing it before any real or production use, including data backups, credentials (change all demo passwords such as the seeded admin password) and hosting configuration. The author is not liable for any data loss, security incident or damage resulting from its use.

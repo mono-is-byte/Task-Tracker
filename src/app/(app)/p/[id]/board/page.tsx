@@ -12,6 +12,8 @@ import TaskMenu from "@/components/TaskMenu";
 import AssignStepDialog from "@/components/AssignStepDialog";
 import Avatar from "@/components/Avatar";
 import { timerChipClass, timerSummary, fmtDur } from "@/lib/timerFormat";
+import { canTransition } from "@/lib/workflow";
+import { buildTaskNotes } from "@/lib/notes";
 import { IconCalendar, IconClipboardCheck, IconPause, IconPlay, IconX } from "@/components/icons";
 
 type Card = TaskRow & {
@@ -21,6 +23,8 @@ type Card = TaskRow & {
   priority: { name: string; color: string };
   typeId: string | null; type: { id: string; name: string; color: string } | null;
   assignee: { id: string; name: string; avatarUrl: string | null } | null;
+  /** PHASE 4: who performed the latest assignment (system field). */
+  assignedBy: { id: string; name: string; deletedAt: string | null } | null;
   testedBy: { id: string; name: string } | null;
   epic: { id: string; name: string } | null;
   position: number;
@@ -69,7 +73,7 @@ export default function BoardPage() {
     for (const c of typed) {
       const name =
         lane === "assignee" ? (c.assignee?.name ?? "(unassigned)") :
-        lane === "epic" ? (c.epic?.name ?? "(no project name)") :
+        lane === "epic" ? (c.epic?.name ?? "(no epic)") :
         lane === "type" ? (c.type?.name ?? "(no issue type)") :
         lane === "priority" ? c.priority.name : "";
       const arr = map.get(name) ?? [];
@@ -81,6 +85,22 @@ export default function BoardPage() {
 
   if (!lookups) return <p className="text-sm">Loading board…</p>;
   const canChange = lookups.membership.perms.change_status === true || lookups.membership.isSuperAdmin;
+  // Phase 1: the transition matrix is the single source of truth. Super Admin or
+  // a role flagged `bypass_transitions` (Project Manager) may drop anywhere; all
+  // others only along a configured A→B row that lists one of their roles.
+  const bypassTransitions =
+    lookups.membership.isSuperAdmin || lookups.membership.perms.bypass_transitions === true;
+  const canDrop = (c: Card | undefined, toStatusId: string): boolean =>
+    !c
+      ? false
+      : canTransition({
+          transitions: lookups.transitions,
+          fromStatusId: c.statusId,
+          toStatusId,
+          roleIds: lookups.membership.roleIds,
+          bypass: bypassTransitions,
+          issueTypeId: c.typeId,
+        }).allowed;
   // Task creation is PM/Admin only (Phase 1) — server enforces `create_task` too.
   const canCreate = lookups.membership.perms.create_task === true || lookups.membership.isSuperAdmin;
   // Creation rule (change request): new tasks may only be started in the To Do
@@ -154,7 +174,7 @@ export default function BoardPage() {
         onDragStart={(e) => { setDragId(c.id); e.dataTransfer.effectAllowed = "move"; }}
         onDragEnd={() => setDragId(null)}
         onClick={() => setDrawerId(c.id)}
-        className={`mb-1.5 cursor-pointer rounded-lg border border-l-4 bg-surface p-2 shadow-sm transition-shadow hover:shadow ${TIMER_BORDER[c.timerState] ?? "border-l-transparent"} ${dragId === c.id ? "opacity-40" : ""}`}
+        className={`glass mb-1.5 cursor-pointer rounded-lg border border-l-4 p-2 shadow-sm transition-shadow hover:shadow ${TIMER_BORDER[c.timerState] ?? "border-l-transparent"} ${dragId === c.id ? "opacity-40" : ""}`}
       >
         {/* Identifier + issue type + priority + actions on one aligned row (change request 2/3/5). */}
         <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted">
@@ -190,9 +210,28 @@ export default function BoardPage() {
           </div>
         </div>
         <div className="mt-1 break-words text-xs font-semibold leading-snug">{c.title}</div>
+        {(() => {
+          const notes = buildTaskNotes((c as { comments?: unknown[] }).comments as { id: string; kind: string; body: string; createdAt: string; author: { name: string; deletedAt?: string | null } | null }[] | undefined);
+          if (notes.length === 0) return null;
+          const shown = notes.slice(-3);
+          const more = notes.length - shown.length;
+          return (
+            <div className="mt-1 space-y-0.5 text-[10px] text-muted" title="Open the task to edit these notes">
+              {shown.map((n) => (
+                <div key={n.id} className="truncate">
+                  <span className="font-medium">{n.n}.</span> {n.text}
+                </div>
+              ))}
+              {more > 0 && <div className="text-slate-400">+{more} more</div>}
+            </div>
+          );
+        })()}
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted">
           {c.assignee && (
-            <span className="flex min-w-0 items-center gap-1" title={`Assignee: ${c.assignee.name}`}>
+            <span
+              className="flex min-w-0 items-center gap-1"
+              title={`Assignee: ${c.assignee.name}${c.assignedBy ? ` · Assigned by: ${c.assignedBy.name}${c.assignedBy.deletedAt ? " (removed)" : ""}` : ""}`}
+            >
               <Avatar name={c.assignee.name} url={c.assignee.avatarUrl} size={20} />
               <span className="max-w-[6rem] truncate">{c.assignee.name}</span>
             </span>
@@ -247,7 +286,7 @@ export default function BoardPage() {
         <select value={lane} onChange={(e) => setLane(e.target.value)} className="rounded-md border border-line bg-surface p-1.5">
           <option value="">No swimlanes</option>
           <option value="assignee">Swimlanes: Assignee</option>
-          <option value="epic">Swimlanes: Project Name</option>
+          <option value="epic">Swimlanes: Epic</option>
           <option value="type">Swimlanes: Issue Type</option>
           <option value="priority">Swimlanes: Priority</option>
         </select>
@@ -272,6 +311,14 @@ export default function BoardPage() {
                     if (dragId && canChange) {
                       const moving = typed.find((c) => c.id === dragId);
                       if (moving && moving.statusId !== s.id) {
+                        // Phase 1: client guard (the server re-checks and returns
+                        // 403). A denied drop reverts and explains why.
+                        if (!canDrop(moving, s.id)) {
+                          const from = lookups.statuses.find((x) => x.id === moving.statusId);
+                          setMsg(`Moving “${from?.name ?? "?"}” → “${s.name}” is not allowed for your role.`);
+                          setDragId(null);
+                          return;
+                        }
                         if (s.category === "done") {
                           // Timer rule: moving INTO a final status never opens the
                           // "Assign to" step and never changes the assignee.
@@ -286,7 +333,9 @@ export default function BoardPage() {
                       setDragId(null);
                     }
                   }}
-                  className="w-64 shrink-0 rounded bg-slate-100 p-1 dark:bg-slate-800/60">
+                  className={`w-64 shrink-0 rounded bg-slate-100 p-1 transition-opacity dark:bg-slate-800/60 ${
+                    dragId && !canDrop(typed.find((c) => c.id === dragId), s.id) ? "opacity-40" : ""
+                  }`}>
                   <div className="mb-1 flex items-center gap-1 px-1 text-xs font-bold" style={{ color: s.color }}>
                     <span className="inline-block h-2 w-2 rounded-full" style={{ background: s.color }} />
                     {s.name}

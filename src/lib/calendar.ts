@@ -59,6 +59,8 @@ export interface CalendarTask {
   statusName: string; statusColor: string; statusCategory: string;
   priorityName: string; priorityColor: string;
   assigneeId: string | null; assigneeName: string | null;
+  /** PHASE 4: who performed the latest assignment ("(removed)" when deleted). */
+  assignedByName: string | null;
   startDate: string | null; endDate: string | null;
   /** Timer due (day key) — takes precedence over endDate as the calendar due day. */
   dueAt: string | null;
@@ -146,6 +148,7 @@ export async function fetchCalendarData(
         status: { select: { name: true, color: true, category: true, timerRole: true } },
         priority: { select: { name: true, color: true } },
         assignee: { select: { id: true, name: true } },
+        assignedBy: { select: { name: true, deletedAt: true } },
         project: { select: { key: true, name: true } },
       },
     }),
@@ -190,6 +193,7 @@ export async function fetchCalendarData(
       statusName: t.status.name, statusColor: t.status.color, statusCategory: t.status.category,
       priorityName: t.priority.name, priorityColor: t.priority.color,
       assigneeId: t.assigneeId, assigneeName: t.assignee?.name ?? null,
+      assignedByName: t.assignedBy ? `${t.assignedBy.name}${t.assignedBy.deletedAt ? " (removed)" : ""}` : null,
       startDate: t.startDate ? dayKey(t.startDate) : null,
       endDate: t.endDate ? dayKey(t.endDate) : null,
       dueAt: t.dueAt ? dayKey(t.dueAt) : null,

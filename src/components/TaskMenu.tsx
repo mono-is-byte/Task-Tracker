@@ -131,7 +131,7 @@ export default function TaskMenu({
           </button>
           {open && (
             <div
-              className={`absolute top-full z-40 mt-1 w-32 rounded border border-line bg-surface py-1 text-xs shadow-lg ${align === "right" ? "right-0" : "left-0"}`}
+              className={`glass-strong absolute top-full z-40 mt-1 w-32 rounded border border-line py-1 text-xs shadow-lg ${align === "right" ? "right-0" : "left-0"}`}
             >
               {canRename && (
                 <button

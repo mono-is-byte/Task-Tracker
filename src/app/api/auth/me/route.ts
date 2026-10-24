@@ -17,6 +17,7 @@ export async function GET(req: Request) {
       id: u.id, email: u.email, username: u.username, name: u.name,
       isSuperAdmin: u.isSuperAdmin, mustChangePassword: u.mustChangePassword,
       theme: u.theme, avatarUrl: u.avatarUrl, hoursPerDay: u.hoursPerDay,
+      gender: u.gender,
     },
     memberships: memberships.map((m) => ({
       projectId: m.projectId, projectKey: m.project.key, projectName: m.project.name,

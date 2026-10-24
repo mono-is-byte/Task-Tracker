@@ -243,6 +243,19 @@ export async function updateHoliday(
   if (!normalized.ok) return normalized;
   const { fields } = normalized;
 
+  // PHASE 6b: saving exactly what is already stored is a no-op — no write and
+  // no audit row. (`normalizeFields` already falls back to the stored values,
+  // so an untouched form compares equal here.)
+  if (
+    dayKey(fields.start) === base.startDate &&
+    dayKey(fields.end) === base.endDate &&
+    fields.name === base.name &&
+    fields.description === base.description &&
+    fields.type === base.type
+  ) {
+    return { ok: true, holiday: toHolidayRow(target, true) };
+  }
+
   const duplicate = await findDuplicate(client, fields, holidayId);
   if (duplicate) {
     const cStart = dayKey(duplicate.date);

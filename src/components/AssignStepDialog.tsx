@@ -25,7 +25,7 @@ export default function AssignStepDialog({ lookups, statusId, currentAssigneeId,
 
   const status = lookups.statuses.find((s) => s.id === statusId);
   const { suggested, others } = useMemo(
-    () => suggestedForStatus(lookups.members, status?.designationTags ?? []),
+    () => suggestedForStatus(lookups.members, status?.designationRoleIds ?? []),
     [lookups.members, status],
   );
 
@@ -69,7 +69,7 @@ export default function AssignStepDialog({ lookups, statusId, currentAssigneeId,
         </h4>
         <p className="mb-3 text-xs text-slate-500">
           {suggested.length > 0
-            ? "Users whose designation matches this status's suggestion list are shown first."
+            ? "Members holding a role this status suggests are shown first."
             : "Pick a user, or skip to move the task without changing its assignee."}
         </p>
 

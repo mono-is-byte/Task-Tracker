@@ -43,7 +43,7 @@ export default function ConfirmDialog({
         role="alertdialog"
         aria-modal="true"
         aria-label={title}
-        className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-lg border border-line bg-surface p-4 shadow-xl"
+        className="glass-strong max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-lg border border-line p-4 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h4 className="mb-1 break-words text-sm font-bold">{title}</h4>

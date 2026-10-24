@@ -56,7 +56,7 @@ export default function EditProjectDialog({
   return createPortal(
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
       <form
-        className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-lg border border-line bg-surface p-4 shadow-xl"
+        className="glass-strong max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-lg border border-line p-4 shadow-xl"
         onClick={(e) => e.stopPropagation()}
         onSubmit={(e) => {
           e.preventDefault();

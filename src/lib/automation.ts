@@ -59,7 +59,31 @@ export async function runAutomation(client: PrismaClient, ctx: AutomationContext
       else updates[field] = value;
     }
     if (Object.keys(updates).length > 0) {
-      await client.task.update({ where: { id: ctx.taskId }, data: updates as never });
+      // PHASE 4: an automation that sets the assignee must keep the "assigned
+      // by" snapshot + the assignment history truthful. The actor is whoever
+      // triggered the action; `meta.via` records which rule did it. Setting the
+      // same assignee is a no-op (no snapshot change, no history row).
+      if ("assigneeId" in updates) {
+        const toId = updates.assigneeId == null || updates.assigneeId === "" ? null : String(updates.assigneeId);
+        const fromId = (ctx.task.assigneeId as string | null) ?? null;
+        if (toId === fromId) {
+          delete updates.assigneeId;
+        } else {
+          updates.assigneeId = toId;
+          updates.assignedById = toId ? (ctx.actorId ?? null) : null;
+          updates.assignedAt = toId ? new Date() : null;
+          await client.activity.create({
+            data: {
+              taskId: ctx.taskId, actorId: ctx.actorId ?? null, action: "task.assigned",
+              field: "assigneeId", before: fromId, after: toId,
+              meta: JSON.stringify({ via: `automation:${rule.name}` }),
+            },
+          });
+        }
+      }
+      if (Object.keys(updates).length > 0) {
+        await client.task.update({ where: { id: ctx.taskId }, data: updates as never });
+      }
     }
     const notify = action.notify as { user?: string; title?: string; body?: string } | undefined;
     if (notify?.user) {

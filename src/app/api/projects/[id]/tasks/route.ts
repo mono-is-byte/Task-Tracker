@@ -15,7 +15,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   try {
     const result = await listTasks(db, ctxFromLoad(loaded.project, auth.membership, auth.user.id), {
       epicId: q.get("epicId") ?? undefined,
-      storyId: q.get("storyId") ?? undefined,
       statusId: q.get("statusId") ?? undefined,
       priorityId: q.get("priorityId") ?? undefined,
       assigneeId: q.get("assigneeId") ?? undefined,

@@ -221,7 +221,7 @@ export default function CalendarSettings({
       <div
         role="dialog"
         aria-label="Calendar Settings — holidays and working days"
-        className="mt-10 max-h-[85vh] w-[52rem] max-w-full overflow-auto rounded border border-line bg-surface p-4 text-sm shadow-lg"
+        className="glass-strong mt-10 max-h-[85vh] w-[52rem] max-w-full overflow-auto rounded border border-line p-4 text-sm shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-2 flex items-center gap-2">

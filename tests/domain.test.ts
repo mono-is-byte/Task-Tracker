@@ -3,7 +3,6 @@ import {
   capacityReport,
   computeCapacity,
   estDays,
-  isFibonacci,
   matchesSearch,
   normalizeSearch,
   workingDaysBetween,
@@ -26,12 +25,6 @@ describe("estDays (always calculated, never typed)", () => {
   });
 });
 
-describe("story points scale", () => {
-  it("accepts Fibonacci only", () => {
-    for (const n of [1, 2, 3, 5, 8, 13, 21]) expect(isFibonacci(n)).toBe(true);
-    for (const n of [0, 4, 6, 7, 10, 20]) expect(isFibonacci(n)).toBe(false);
-  });
-});
 
 describe("Bangla search", () => {
   it("normalizes unicode (NFC) before matching", () => {
@@ -84,9 +77,8 @@ describe("capacity", () => {
     ).toBe(70);
   });
   it("warns when planned exceeds capacity", () => {
-    const r = capacityReport([{ estHours: 50, storyPoints: 8 }, { estHours: 40 }], 80);
+    const r = capacityReport([{ estHours: 50 }, { estHours: 40 }], 80);
     expect(r.plannedHours).toBe(90);
-    expect(r.plannedPoints).toBe(8);
     expect(r.over).toBe(true);
     expect(r.overflow).toBe(10);
     expect(capacityReport([{ estHours: 10 }], 80).over).toBe(false);

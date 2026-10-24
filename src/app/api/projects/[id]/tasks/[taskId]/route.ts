@@ -1,7 +1,7 @@
-import { fail, ok, readJson, requireMember } from "@/lib/api";
+import { clientIp, fail, ok, readJson, requireMember } from "@/lib/api";
 import { db } from "@/lib/db";
 import { loadProject } from "@/lib/server";
-import { TaskInput, ctxFromLoad, deleteTask, serializeTask, updateTask } from "@/lib/tasks";
+import { TaskInput, ctxFromLoad, deleteTask, serializeTask, stripHiddenFields, updateTask } from "@/lib/tasks";
 
 async function ctxOf(projectId: string, userId: string, isSuperAdmin: boolean) {
   const loaded = await loadProject(projectId, userId, isSuperAdmin);
@@ -20,9 +20,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     include: {
       status: true, priority: true, type: true,
       assignee: { select: { id: true, name: true, username: true, avatarUrl: true } },
+      assignedBy: { select: { id: true, name: true, username: true, avatarUrl: true, deletedAt: true } },
       testedBy: { select: { id: true, name: true, username: true, avatarUrl: true } },
-      epic: true, story: true,
-      comments: { include: { author: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } },
+      epic: true,
+      comments: { include: { author: { select: { id: true, name: true, deletedAt: true } } }, orderBy: { createdAt: "asc" } },
       linksFrom: { include: { to: { select: { id: true, serial: true, title: true } } } },
       linksTo: { include: { from: { select: { id: true, serial: true, title: true } } } },
     },
@@ -34,13 +35,34 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     orderBy: { createdAt: "desc" },
     take: 50,
   });
-  // hide hidden fields for this role
-  const rules = auth.membership.fieldRules;
-  const out = serializeTask(c.loaded.project.key, c.loaded.project.hoursPerDay, task as unknown as Record<string, unknown>) as Record<string, unknown>;
-  for (const [k, rule] of Object.entries(rules)) {
-    if (rule === "hidden" && k in out) out[k] = null;
+  const assignIds = new Set<string>();
+  for (const a of activities) {
+    if (a.action === "task.assigned" || (a.action === "task.updated" && a.field === "assigneeId")) {
+      if (a.before) assignIds.add(a.before);
+      if (a.after) assignIds.add(a.after);
+    }
   }
-  return ok({ task: out, activities });
+  const assignUsers = assignIds.size > 0
+    ? await db.user.findMany({ where: { id: { in: [...assignIds] } }, select: { id: true, name: true, deletedAt: true } })
+    : [];
+  const assignNames = new Map(assignUsers.map((u) => [u.id, u.deletedAt ? `${u.name} (removed)` : u.name]));
+  const activitiesOut = activities.map((a) =>
+    a.action === "task.assigned" || (a.action === "task.updated" && a.field === "assigneeId")
+      ? {
+          ...a,
+          beforeName: a.before ? assignNames.get(a.before) ?? null : null,
+          afterName: a.after ? assignNames.get(a.after) ?? null : null,
+        }
+      : a,
+  );
+  const out = stripHiddenFields(
+    serializeTask(c.loaded.project.key, c.loaded.project.hoursPerDay, task as unknown as Record<string, unknown>),
+    auth.membership.fieldRules,
+  ) as Record<string, unknown>;
+  out.project = { id: c.loaded.project.id, key: c.loaded.project.key, name: c.loaded.project.name };
+  out.projectKey = c.loaded.project.key;
+  out.projectName = c.loaded.project.name;
+  return ok({ task: out, activities: activitiesOut });
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string; taskId: string }> }) {
@@ -49,13 +71,49 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if ("response" in auth) return auth.response;
   const c = await ctxOf(id, auth.user.id, auth.user.isSuperAdmin);
   if (!c) return fail(404, "not_found", "Project not found.");
+  c.ctx.ip = clientIp(req);
   const { value, error } = await readJson(req);
   if (error) return error;
-  const parsed = TaskInput.safeParse(value);
+  const body = (value && typeof value === "object" ? { ...(value as Record<string, unknown>) } : {}) as Record<string, unknown>;
+  const toggle = body.assignedByToggle;
+  delete body.assignedByToggle;
+  const parsed = TaskInput.safeParse(body);
   if (!parsed.success) return fail(400, "validation", "Invalid task fields.", parsed.error.issues);
   try {
-    const updated = await updateTask(db, c.ctx, taskId, parsed.data);
-    return ok({ task: updated });
+    const updated = (await updateTask(db, c.ctx, taskId, parsed.data)) as Record<string, unknown>;
+    if (toggle !== undefined) {
+      if (!auth.membership.perms.assign && !auth.membership.isSuperAdmin) {
+        return fail(403, "forbidden", "Only users with the assign permission can change 'Assigned by'.");
+      }
+      const checked = toggle === true;
+      await db.task.update({
+        where: { id: taskId },
+        data: checked
+          ? { assignedById: auth.user.id, assignedAt: new Date() }
+          : { assignedById: null, assignedAt: null },
+      });
+      await db.activity.create({
+        data: {
+          taskId,
+          actorId: auth.user.id,
+          action: "task.assigned",
+          field: "assignedById",
+          before: checked ? null : (updated.assignedById as string | null),
+          after: checked ? auth.user.id : null,
+          meta: JSON.stringify({ via: "checkbox" }),
+        },
+      });
+      updated.assignedById = checked ? auth.user.id : null;
+      updated.assignedAt = checked ? new Date().toISOString() : null;
+      updated.assignedBy = checked
+        ? { id: auth.user.id, name: auth.user.name, deletedAt: null }
+        : null;
+    }
+    const out = stripHiddenFields(updated, auth.membership.fieldRules) as Record<string, unknown>;
+    out.project = { id: c.loaded.project.id, key: c.loaded.project.key, name: c.loaded.project.name };
+    out.projectKey = c.loaded.project.key;
+    out.projectName = c.loaded.project.name;
+    return ok({ task: out });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Cannot update task.";
     const status = msg === "Task not found." ? 404 : 403;
@@ -69,6 +127,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   if ("response" in auth) return auth.response;
   const c = await ctxOf(id, auth.user.id, auth.user.isSuperAdmin);
   if (!c) return fail(404, "not_found", "Project not found.");
+  c.ctx.ip = clientIp(req);
   try {
     await deleteTask(db, c.ctx, taskId);
     return ok({ deleted: true });

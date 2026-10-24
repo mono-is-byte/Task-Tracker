@@ -77,6 +77,8 @@ export interface ManagedUserPatch {
   mustChangePassword?: boolean;
   /** Designation = the id of a role from Roles & Permissions ("" / null clears). */
   designation?: string | null;
+  /** Change request Phase 2: optional gender ("" / null clears it). */
+  gender?: string | null;
 }
 
 /**
@@ -118,7 +120,7 @@ export async function updateManagedUser(
     if (adminOnlyFields.length > 0) {
       return { ok: false, status: 403, error: "Only an Admin can change this." };
     }
-    if (patch.name === undefined && patch.designation === undefined) {
+    if (patch.name === undefined && patch.designation === undefined && patch.gender === undefined) {
       return { ok: false, status: 400, error: "Nothing to update." };
     }
     if (!(await canEditTargetUser(client, actor, targetUserId))) {
@@ -145,14 +147,35 @@ export async function updateManagedUser(
     if (patch.isSuperAdmin === false) return { ok: false, status: 400, error: "You cannot remove your own Admin flag." };
   }
 
-  const before = { name: target.name, email: target.email, active: target.active, isSuperAdmin: target.isSuperAdmin, designation: target.designation };
+  const before = { name: target.name, email: target.email, active: target.active, isSuperAdmin: target.isSuperAdmin, designation: target.designation, gender: target.gender };
   const data: Record<string, unknown> = {};
   if (patch.name !== undefined) data.name = patch.name.trim();
   if (patch.email !== undefined) data.email = patch.email.trim().toLowerCase();
   if (patch.active !== undefined) data.active = patch.active;
   if (patch.isSuperAdmin !== undefined) data.isSuperAdmin = patch.isSuperAdmin;
   if (patch.mustChangePassword !== undefined) data.mustChangePassword = patch.mustChangePassword;
+  // Phase 1 (role = designation): the admin's explicit pick is authoritative.
+  // `syncUserDesignation` (membership flows) keeps it aligned with project
+  // roles afterwards; see src/lib/designation.ts for the full decision.
   if (designation !== undefined) data.designation = designation;
+  // Phase 2: gender is a plain optional profile value ("" normalises to null).
+  if (patch.gender !== undefined) data.gender = patch.gender?.trim() || null;
+
+  // PHASE 6b: a save that changes nothing must not write and must not add an
+  // audit row. Drop every incoming value that already matches the stored row.
+  const currentValues: Record<string, unknown> = {
+    name: target.name, email: target.email, active: target.active, isSuperAdmin: target.isSuperAdmin,
+    mustChangePassword: target.mustChangePassword, designation: target.designation, gender: target.gender,
+  };
+  for (const [field, value] of Object.entries(data)) {
+    if (value === currentValues[field]) delete data[field];
+  }
+  if (Object.keys(data).length === 0) {
+    return {
+      ok: true,
+      user: { id: target.id, name: target.name, email: target.email, active: target.active, isSuperAdmin: target.isSuperAdmin },
+    };
+  }
 
   let user;
   try {
@@ -162,7 +185,7 @@ export async function updateManagedUser(
   }
   await audit(client, {
     actorId: actor.id, action: "user.update", entity: "user", entityId: targetUserId,
-    meta: { before, after: { name: user.name, email: user.email, active: user.active, isSuperAdmin: user.isSuperAdmin, designation: user.designation } }, ip,
+    meta: { before, after: { name: user.name, email: user.email, active: user.active, isSuperAdmin: user.isSuperAdmin, designation: user.designation, gender: user.gender } }, ip,
   });
   if (before.isSuperAdmin !== user.isSuperAdmin || before.active !== user.active) {
     await audit(client, {
@@ -271,8 +294,24 @@ export async function softDeleteUser(
   }
 
   const now = new Date();
+  // PHASE 4: collect the tasks being unassigned first — the deletion must also
+  // leave an assignment-history row per task (actor = the deleting admin) and
+  // clear the "assigned by" snapshot together with the assignee.
+  const losingAssignee = await client.task.findMany({
+    where: { assigneeId: targetUserId },
+    select: { id: true },
+  });
   const [unassigned] = await client.$transaction([
-    client.task.updateMany({ where: { assigneeId: targetUserId }, data: { assigneeId: null } }),
+    client.task.updateMany({
+      where: { assigneeId: targetUserId },
+      data: { assigneeId: null, assignedById: null, assignedAt: null },
+    }),
+    client.activity.createMany({
+      data: losingAssignee.map((t) => ({
+        taskId: t.id, actorId: actor.id, action: "task.assigned", field: "assigneeId",
+        before: targetUserId, after: null, meta: JSON.stringify({ via: "user-deleted" }),
+      })),
+    }),
     client.projectMember.deleteMany({ where: { userId: targetUserId } }),
     client.session.updateMany({ where: { userId: targetUserId, revokedAt: null }, data: { revokedAt: now } }),
     client.user.update({

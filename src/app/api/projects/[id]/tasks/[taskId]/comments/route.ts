@@ -2,6 +2,7 @@ import { z } from "zod";
 import { fail, ok, readJson, requireMember } from "@/lib/api";
 import { db } from "@/lib/db";
 import { publish } from "@/lib/events";
+import { filterVisibleNotes } from "@/lib/notes";
 
 const CommentBody = z.object({
   body: z.string().min(1).max(20000),
@@ -22,10 +23,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if ("response" in auth) return auth.response;
   const comments = await db.comment.findMany({
     where: { taskId, task: { projectId: id } },
-    include: { author: { select: { id: true, name: true } } },
+    include: { author: { select: { id: true, name: true, deletedAt: true } } },
     orderBy: { createdAt: "asc" },
   });
-  return ok({ comments });
+  return ok({ comments: filterVisibleNotes(comments, auth.membership.fieldRules) });
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string; taskId: string }> }) {
@@ -46,8 +47,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return fail(403, "forbidden", "Your role cannot comment. (Admins can enable viewer comments in project settings.)");
   }
   const kind = parsed.data.kind ?? "comment";
-  if ((kind === "remark" || kind === "feedback") && auth.membership.fieldRules[kind] === "hidden") {
-    return fail(403, "forbidden", `Your role cannot write ${kind}.`);
+  if (kind === "remark" || kind === "feedback") {
+    const rule = auth.membership.fieldRules[kind] ?? "readonly";
+    if (rule !== "editable" && !auth.membership.isSuperAdmin) {
+      return fail(403, "forbidden", `The ${kind} field is ${rule} for your role.`);
+    }
   }
   const comment = await db.comment.create({
     data: { taskId, authorId: auth.user.id, kind, body: parsed.data.body },

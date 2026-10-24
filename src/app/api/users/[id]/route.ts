@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { fail, ok, readJson, requireUser, clientIp } from "@/lib/api";
 import { adminResetPassword } from "@/lib/auth";
+import { GENDERS } from "@/lib/accountRules";
 import { db } from "@/lib/db";
 import { softDeleteUser, updateManagedUser } from "@/lib/users";
 
-/** edit (Admin anywhere; PM for users of a managed project — name and
+/** edit (Admin anywhere; PM for users of a managed project — name, gender and
  *  designation (a role reference) only) and soft-delete (Admin only). */
 
 const PatchBody = z.object({
@@ -15,6 +16,8 @@ const PatchBody = z.object({
   mustChangePassword: z.boolean().optional(),
   /** Designation = a Role id; "" / null clears it. Validated in updateManagedUser. */
   designation: z.string().max(60).nullable().optional(),
+  /** Change request Phase 2: optional gender; "" / null clears it. */
+  gender: z.enum(GENDERS).nullable().optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

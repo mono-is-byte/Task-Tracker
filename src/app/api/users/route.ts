@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { fail, ok, readJson, requireAdmin, requireUser, clientIp } from "@/lib/api";
 import { audit, createUser } from "@/lib/auth";
+import { GENDERS } from "@/lib/accountRules";
 import { db } from "@/lib/db";
 import { mergeRoles } from "@/lib/permissions";
 import { canUseUsersPage, resolveDesignationRole } from "@/lib/users";
@@ -64,6 +65,8 @@ export async function GET(req: Request) {
       active: u.active, isSuperAdmin: u.isSuperAdmin, mustChangePassword: u.mustChangePassword,
       lockedUntil: u.lockedUntil, lastActiveAt: u.lastActiveAt, createdAt: u.createdAt,
       avatarUrl: u.avatarUrl,
+      /** Change request Phase 2: optional gender. */
+      gender: u.gender,
       /** Role id ("" when the role was deleted / never set). */
       designation: u.designation && roleName.has(u.designation) ? u.designation : null,
       /** Live role name for display (follows renames automatically). */
@@ -80,6 +83,8 @@ const CreateBody = z.object({
   isSuperAdmin: z.boolean().optional(),
   /** Designation = the id of a role from Roles & Permissions (validated below). */
   designation: z.string().max(60).nullable().optional(),
+  /** Change request Phase 2: optional gender. */
+  gender: z.enum(GENDERS).nullable().optional(),
 });
 
 export async function POST(req: Request) {

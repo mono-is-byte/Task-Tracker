@@ -146,7 +146,7 @@ export default function CalendarPage() {
     <button
       key={t.id}
       onClick={() => router.push(`/p/${t.projectId}/board?task=${t.id}`)}
-      title={`${t.key} ${t.title}\n${t.startDate ?? "…"} → ${t.endDate ?? "…"} · ${t.statusName}${t.assigneeName ? ` · ${t.assigneeName}` : ""}\nTimer: ${TIMER_LABEL[t.timerState] ?? t.timerState}`}
+      title={`${t.key} ${t.title}\n${t.startDate ?? "…"} → ${t.endDate ?? "…"} · ${t.statusName}${t.assigneeName ? ` · ${t.assigneeName}` : ""}${t.assignedByName ? ` (assigned by ${t.assignedByName})` : ""}\nTimer: ${TIMER_LABEL[t.timerState] ?? t.timerState}`}
       className="block w-full truncate rounded-r border-l-4 bg-surface px-1 text-left text-[10px] leading-4 shadow-sm hover:bg-line"
       style={{ borderLeftColor: TIMER_HEX[t.timerState] ?? t.statusColor }}
     >

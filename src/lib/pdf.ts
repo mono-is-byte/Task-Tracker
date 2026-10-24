@@ -183,9 +183,9 @@ export function footer(c: PdfCtx, label: string): void {
 export interface ReportPdfInput {
   project: { key: string; name: string };
   generatedAt: Date;
-  summary: { total: number; open: number; done: number; overdue: number; points: number; est: number; logged: number; rd: number };
+  summary: { total: number; open: number; done: number; overdue: number; est: number; logged: number; rd: number };
   statusDist: { name: string; count: number; color: string }[];
-  perAssignee: { name: string; n: number; pts: number; hrs: number }[];
+  perAssignee: { name: string; n: number; hrs: number }[];
   perTester: { name: string; n: number }[];
   overdue: { key: string; title: string; endDate: string | null }[];
 }
@@ -206,7 +206,6 @@ export async function buildReportPdf(input: ReportPdfInput): Promise<jsPDF> {
     ["Total tasks", String(input.summary.total)],
     ["Open / Done", `${input.summary.open} / ${input.summary.done}`],
     ["Overdue", String(input.summary.overdue)],
-    ["Story points", String(input.summary.points)],
     ["Estimated hours", `${input.summary.est}h`],
     ["Logged hours", `${input.summary.logged}h`],
     ["Unestimated R&D", `${input.summary.rd}h`],
@@ -234,7 +233,7 @@ export async function buildReportPdf(input: ReportPdfInput): Promise<jsPDF> {
   if (input.perAssignee.length) {
     section(c, "Open tasks per assignee");
     const max = maxOf(input.perAssignee.map((a) => a.n));
-    for (const a of input.perAssignee) barRow(c, `${a.name} (${a.pts}p/${a.hrs}h)`, a.n, max, "#3b82f6");
+    for (const a of input.perAssignee) barRow(c, `${a.name} (${a.hrs}h)`, a.n, max, "#3b82f6");
   }
 
   if (input.perTester.length) {

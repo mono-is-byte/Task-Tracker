@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { db, taskKey } from "@/lib/db";
 import { listProjectsForUser, requireViewer } from "@/lib/server";
+import { designationLabel } from "@/lib/designation";
 import { dashboardLists, dashboardSummary } from "@/lib/dashboard";
 import StatBar from "@/components/StatBar";
 import DashboardProjectFilter from "@/components/DashboardProjectFilter";
@@ -68,8 +69,22 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <p className="rounded border border-dashed border-line px-3 py-2 text-xs text-muted">{children}</p>;
 }
 
+/**
+ * PHASE 4: friendly text for one activity row. Assignment events (the new
+ * "task.assigned" action and the legacy `task.updated` + assigneeId rows) read
+ * as "assigned to <name>" / "unassigned" instead of raw ids.
+ */
+function activityLabel(a: { action: string; field: string | null; after: string | null; afterName?: string | null }): string {
+  const isAssign = a.action === "task.assigned" || (a.action === "task.updated" && a.field === "assigneeId");
+  if (isAssign) return a.after ? `assigned to ${a.afterName ?? "someone"}` : "unassigned";
+  return a.field ? `${a.action}:${a.field}` : a.action;
+}
+
 export default async function MyWorkPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { user } = await requireViewer("/");
+  // Phase 2 (role = designation): the header badge shows the user's REAL role
+  // name resolved from the Role table — never a hard-coded "Team member".
+  const roleLabel = await designationLabel(db, user);
   const sp = await searchParams;
   const requestedProject = typeof sp.project === "string" ? sp.project : "";
   // Hidden projects stay in My Work task queries (members keep their assignments);
@@ -143,7 +158,7 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
             recent={recent.map((a) => ({
               key: taskKey(a.task.project.key, a.task.serial),
               title: a.task.title,
-              action: a.field ? `${a.action}:${a.field}` : a.action,
+              action: activityLabel(a),
               actor: a.actor?.name ?? "system",
               when: new Date(a.createdAt).toISOString().slice(0, 16).replace("T", " "),
             }))}
@@ -152,7 +167,7 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
               : projects.map((p) => ({ key: p.key, name: p.name }))}
           />
           <span className={`rounded-full border border-line px-2.5 py-1 text-xs font-medium ${user.isSuperAdmin ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300" : "bg-surface text-muted"}`}>
-            {user.isSuperAdmin ? "Super Admin" : "Team member"}
+            {roleLabel}
           </span>
         </div>
       </div>
@@ -263,7 +278,7 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
                   <li key={a.id} className="rounded border bg-surface px-2 py-1 text-xs border-line">
                     <span className="font-mono text-slate-500">{taskKey(a.task.project.key, a.task.serial)}</span>{" "}
                     <Link href={`/p/${a.task.projectId}/board?task=${a.taskId}`} className="hover:underline">{a.task.title}</Link>
-                    <span className="text-slate-500"> — {a.actor?.name ?? "system"} · {a.action}{a.field ? `:${a.field}` : ""}</span>
+                    <span className="text-slate-500"> — {a.actor?.name ?? "system"} · {activityLabel(a)}</span>
                   </li>
                 ))}
               </ul>

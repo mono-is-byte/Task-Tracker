@@ -21,11 +21,28 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!parsed.success) return fail(400, "validation", "Invalid role fields.");
   const role = await db.role.findUnique({ where: { id } });
   if (!role) return fail(404, "not_found", "Role not found.");
+  const safeJson = (raw: string): unknown => {
+    try { return JSON.parse(raw) as unknown; } catch { return raw; }
+  };
+  const next = {
+    name: parsed.data.name !== undefined ? parsed.data.name.trim() : role.name,
+    description: parsed.data.description !== undefined ? parsed.data.description : role.description,
+    permissions: parsed.data.permissions !== undefined ? JSON.stringify(sanitizePerms(parsed.data.permissions)) : role.permissions,
+    fieldRules: parsed.data.fieldRules !== undefined ? JSON.stringify(sanitizeFields(parsed.data.fieldRules)) : role.fieldRules,
+  };
+  const diff: Record<string, [unknown, unknown]> = {};
+  if (next.name !== role.name) diff.name = [role.name, next.name];
+  if (next.description !== role.description) diff.description = [role.description, next.description];
+  if (next.permissions !== role.permissions) diff.permissions = [safeJson(role.permissions), safeJson(next.permissions)];
+  if (next.fieldRules !== role.fieldRules) diff.fieldRules = [safeJson(role.fieldRules), safeJson(next.fieldRules)];
+  if (Object.keys(diff).length === 0) {
+    return ok({ role: { id: role.id, name: role.name } });
+  }
   const data: Record<string, unknown> = {};
-  if (parsed.data.name !== undefined) data.name = parsed.data.name.trim();
-  if (parsed.data.description !== undefined) data.description = parsed.data.description;
-  if (parsed.data.permissions !== undefined) data.permissions = JSON.stringify(sanitizePerms(parsed.data.permissions));
-  if (parsed.data.fieldRules !== undefined) data.fieldRules = JSON.stringify(sanitizeFields(parsed.data.fieldRules));
+  if (diff.name) data.name = next.name;
+  if ("description" in diff) data.description = next.description;
+  if (diff.permissions) data.permissions = next.permissions;
+  if (diff.fieldRules) data.fieldRules = next.fieldRules;
   let updated;
   try {
     updated = await db.role.update({ where: { id }, data });
@@ -34,7 +51,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
   await audit(db, {
     actorId: auth.user.id, action: "role.permission_change", entity: "role", entityId: id,
-    meta: { after: parsed.data }, ip: clientIp(req),
+    meta: diff, ip: clientIp(req),
   });
   return ok({ role: { id: updated.id, name: updated.name } });
 }
@@ -45,12 +62,46 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const { id } = await params;
   const role = await db.role.findUnique({ where: { id } });
   if (!role) return fail(404, "not_found", "Role not found.");
-  if (role.isSystem) return fail(400, "validation", "System roles cannot be deleted. Edit them instead.");
-  const members = await db.projectMemberRole.count({ where: { roleId: id } });
-  if (members > 0) return fail(400, "validation", `Role still has ${members} member(s). Reassign them first.`);
-  // Designations reference roles by id — clear any that point here.
-  await db.user.updateMany({ where: { designation: id }, data: { designation: null } });
+
+  let perms: Record<string, boolean> = {};
+  try { perms = JSON.parse(role.permissions) as Record<string, boolean>; } catch { /* */ }
+  if (perms.bypass_transitions === true || perms.manage_workflow === true) {
+    return fail(400, "validation", "Project Manager / bypass roles cannot be deleted.");
+  }
+
+  const usersCount = await db.user.count({ where: { designation: id, deletedAt: null } });
+  const membershipsCount = await db.projectMemberRole.count({ where: { roleId: id } });
+  const designationTagsCount = await db.statusDesignationTag.count({ where: { roleId: id } });
+  const allTransitions = await db.statusTransition.findMany();
+  const transitionsCount = allTransitions.filter((t) => {
+    try { return (JSON.parse(t.roleIds) as string[]).includes(id); } catch { return false; }
+  }).length;
+
+  // Only a direct user designation blocks deletion. Memberships, designation
+  // tags and transitions are cascade-cleared / stale-id tolerant.
+  if (usersCount > 0) {
+    return fail(400, "in_use", `Role is assigned to ${usersCount} user(s). Remove the designation first.`, {
+      counts: { users: usersCount, memberships: membershipsCount, designationTags: designationTagsCount, transitions: transitionsCount },
+    });
+  }
+
+  // Drop the role from any transition's role list (never widen access).
+  for (const t of allTransitions) {
+    let ids: string[] = [];
+    try { ids = JSON.parse(t.roleIds) as string[]; } catch { ids = []; }
+    if (!ids.includes(id)) continue;
+    const next = ids.filter((r) => r !== id);
+    if (next.length === 0 && ids.length > 0) {
+      await db.statusTransition.delete({ where: { id: t.id } });
+    } else {
+      await db.statusTransition.update({ where: { id: t.id }, data: { roleIds: JSON.stringify(next) } });
+    }
+  }
   await db.role.delete({ where: { id } });
-  await audit(db, { actorId: auth.user.id, action: "role.delete", entity: "role", entityId: id, ip: clientIp(req) });
+  await audit(db, {
+    actorId: auth.user.id, action: "role.delete", entity: "role", entityId: id,
+    meta: { name: role.name, counts: { users: usersCount, memberships: membershipsCount, designationTags: designationTagsCount, transitions: transitionsCount } },
+    ip: clientIp(req),
+  });
   return ok({ deleted: true });
 }

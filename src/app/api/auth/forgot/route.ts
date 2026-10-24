@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { fail, ok, readJson } from "@/lib/api";
+import { clientIp, fail, ok, readJson } from "@/lib/api";
 import { audit, sha256 } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { randomBytes } from "crypto";
@@ -25,13 +25,13 @@ export async function POST(req: Request) {
     await db.passwordReset.create({
       data: { tokenHash: sha256(token), userId: user.id, expiresAt: new Date(Date.now() + 60 * 60 * 1000) },
     });
-    await audit(db, { actorId: user.id, action: "auth.reset_requested", entity: "user", entityId: user.id });
+    await audit(db, { actorId: user.id, action: "auth.reset_requested", entity: "user", entityId: user.id, ip: clientIp(req) });
     // Mail sending is configured by the operator (SMTP_URL); the token is logged server-side
     // so a self-hosted admin can deliver it manually if needed.
     console.log(`[auth] password reset for ${user.email}: token=${token}`);
     return ok({ sent: true });
   }
-  await audit(db, { actorId: user.id, action: "auth.reset_requested_no_mail", entity: "user", entityId: user.id });
+  await audit(db, { actorId: user.id, action: "auth.reset_requested_no_mail", entity: "user", entityId: user.id, ip: clientIp(req) });
   return ok({ sent: true, adminReset: true });
 }
 
@@ -52,6 +52,6 @@ export async function PUT(req: Request) {
   });
   await db.passwordReset.update({ where: { id: pr.id }, data: { usedAt: new Date() } });
   await db.session.updateMany({ where: { userId: pr.userId, revokedAt: null }, data: { revokedAt: new Date() } });
-  await audit(db, { actorId: pr.userId, action: "auth.password_reset", entity: "user", entityId: pr.userId });
+  await audit(db, { actorId: pr.userId, action: "auth.password_reset", entity: "user", entityId: pr.userId, ip: clientIp(req) });
   return ok({ changed: true });
 }

@@ -13,7 +13,6 @@ const SettingsBody = z.object({
   description: z.string().max(500).nullable().optional(),
   hoursPerDay: z.number().min(1).max(24).optional(),
   workingDays: z.array(z.number().min(0).max(6)).optional(),
-  pointScale: z.array(z.number().min(0)).optional(),
   bannerNote: z.string().max(500).nullable().optional(),
   viewersCanComment: z.boolean().optional(),
   isHidden: z.boolean().optional(),
@@ -44,7 +43,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (parsed.data.description !== undefined) data.description = parsed.data.description;
   if (parsed.data.hoursPerDay !== undefined) data.hoursPerDay = parsed.data.hoursPerDay;
   if (parsed.data.workingDays !== undefined) data.workingDays = JSON.stringify(parsed.data.workingDays);
-  if (parsed.data.pointScale !== undefined) data.pointScale = JSON.stringify(parsed.data.pointScale);
   if (parsed.data.bannerNote !== undefined) data.bannerNote = parsed.data.bannerNote;
   if (parsed.data.isHidden !== undefined) data.isHidden = parsed.data.isHidden;
   if (parsed.data.viewersCanComment !== undefined) settings.viewersCanComment = parsed.data.viewersCanComment;

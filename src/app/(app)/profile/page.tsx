@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Avatar from "@/components/Avatar";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { describeDevice, sessionStatus, timeAgo, timeUntil } from "@/lib/sessionInfo";
+import { GENDERS, USERNAME_MAX, USERNAME_MIN, usernameProblems } from "@/lib/accountRules";
 
 interface SessionInfo {
   id: string;
@@ -23,6 +24,8 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export default function ProfilePage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
+  const [gender, setGender] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [meId, setMeId] = useState("");
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -46,12 +49,22 @@ export default function ProfilePage() {
   const [emailError, setEmailError] = useState("");
   const [emailNotice, setEmailNotice] = useState("");
 
+  // Change request Phase 2: self-service username change (password-confirmed).
+  const [editingUsername, setEditingUsername] = useState(false);
+  const [newUsername, setNewUsername] = useState("");
+  const [usernamePassword, setUsernamePassword] = useState("");
+  const [usernameBusy, setUsernameBusy] = useState(false);
+  const [usernameError, setUsernameError] = useState("");
+  const [usernameNotice, setUsernameNotice] = useState("");
+
   useEffect(() => {
     fetch("/api/auth/me").then(async (r) => {
       if (r.ok) {
         const j = await r.json();
         setName(j.data.user.name);
         setEmail(j.data.user.email);
+        setUsername(j.data.user.username);
+        setGender(j.data.user.gender ?? "");
         setAvatarUrl(j.data.user.avatarUrl ?? null);
         setMeId(j.data.user.id);
       }
@@ -83,9 +96,63 @@ export default function ProfilePage() {
     const res = await fetch("/api/profile", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, gender: gender || null }),
     });
     setMsg(res.ok ? "Profile saved." : "Could not save profile.");
+  }
+
+  function startUsernameEdit() {
+    setUsernameError("");
+    setUsernameNotice("");
+    setNewUsername("");
+    setUsernamePassword("");
+    setEditingUsername(true);
+  }
+
+  function cancelUsernameEdit() {
+    setEditingUsername(false);
+    setNewUsername("");
+    setUsernamePassword("");
+    setUsernameError("");
+  }
+
+  async function saveUsername(e: React.FormEvent) {
+    e.preventDefault();
+    setUsernameError("");
+    setUsernameNotice("");
+    const value = newUsername.trim();
+    const problems = usernameProblems(value);
+    if (problems.length > 0) {
+      setUsernameError(`Username needs ${problems.join(", ")}.`);
+      return;
+    }
+    if (!usernamePassword) {
+      setUsernameError("Enter your current password to confirm the change.");
+      return;
+    }
+    setUsernameBusy(true);
+    try {
+      const res = await fetch("/api/profile/username", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: value, password: usernamePassword }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok) {
+        setUsernameError(j?.error?.message ?? "Could not change the username.");
+        return;
+      }
+      // Only mirror what the backend actually stored.
+      setUsername(j.data.user.username);
+      setEditingUsername(false);
+      setNewUsername("");
+      setUsernamePassword("");
+      setUsernameNotice(`Username changed to ${j.data.user.username}. Use it the next time you sign in.`);
+    } catch {
+      setUsernameError("Network error — the username was not changed.");
+    } finally {
+      setUsernameBusy(false);
+    }
   }
 
   function startEmailEdit() {
@@ -241,6 +308,13 @@ export default function ProfilePage() {
             <span className="mb-2 block font-semibold">Name</span>
             <input value={name} onChange={(e) => setName(e.target.value)} className="tt-input" />
           </label>
+          <label className="mb-3 block">
+            <span className="mb-2 block font-semibold">Gender</span>
+            <select value={gender} onChange={(e) => setGender(e.target.value)} className="tt-input">
+              <option value="">— not set —</option>
+              {GENDERS.map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </label>
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <Avatar name={name || "?"} url={avatarUrl} size={40} />
             <label className="tt-btn cursor-pointer">
@@ -258,6 +332,50 @@ export default function ProfilePage() {
             <button className="tt-btn-primary">Save profile</button>
           </div>
         </form>
+
+        <div className="mt-4 border-t border-line pt-3">
+          <h2 className="mb-2 font-semibold">Username</h2>
+          {usernameNotice && (
+            <p className="mb-3 rounded bg-emerald-50 p-2 text-sm text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" role="status">
+              {usernameNotice}
+            </p>
+          )}
+          {!editingUsername ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="font-mono text-sm">@{username || "—"}</span>
+              <button type="button" onClick={startUsernameEdit} className="tt-btn">Change username</button>
+            </div>
+          ) : (
+            <form onSubmit={saveUsername} className="flex flex-col gap-2">
+              <label className="text-sm">New username
+                <input value={newUsername} onChange={(e) => setNewUsername(e.target.value)}
+                  className="tt-input mt-1" placeholder={`${USERNAME_MIN}–${USERNAME_MAX} characters`} autoComplete="username" />
+              </label>
+              <label className="text-sm">Current password (confirms it&apos;s you)
+                <input type="password" value={usernamePassword} onChange={(e) => setUsernamePassword(e.target.value)}
+                  className="tt-input mt-1" placeholder="Current password" autoComplete="current-password" />
+              </label>
+              {usernameError && (
+                <p className="rounded bg-red-50 p-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300" role="alert">
+                  {usernameError}
+                </p>
+              )}
+              <p className="text-xs text-muted">
+                {USERNAME_MIN}–{USERNAME_MAX} characters: letters, digits, dot, underscore or hyphen (no spaces, not an
+                email address). You can sign in with either your email or your username, and you can change the username
+                at most a few times a day.
+              </p>
+              <div className="flex gap-2">
+                <button type="submit" className="tt-btn-primary" disabled={usernameBusy}>
+                  {usernameBusy ? "Saving…" : "Save username"}
+                </button>
+                <button type="button" className="tt-btn" onClick={cancelUsernameEdit} disabled={usernameBusy}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
 
         <div className="mt-4 border-t border-line pt-3">
           <h2 className="mb-2 font-semibold">Email address</h2>

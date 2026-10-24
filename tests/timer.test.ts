@@ -14,7 +14,7 @@ let n = 0;
 const uniq = (p: string) => `${p}-${Date.now()}-${n++}`;
 
 interface Fixture {
-  project: { id: string; key: string; hoursPerDay: number; pointScale: number[] };
+  project: { id: string; key: string; hoursPerDay: number };
   S: Record<string, string>;
   users: Record<string, string>;
 }
@@ -31,13 +31,15 @@ beforeAll(async () => {
   await db.$connect();
   const roles: Record<string, string> = {};
   for (const [name, def] of Object.entries(DEFAULT_ROLES)) {
-    const existing = await db.role.findUnique({ where: { name: `TM-${name}` } });
-    const r = existing ?? (await db.role.create({
-      data: {
+    // test DBs persist between runs — refresh so DEFAULT_ROLES changes apply.
+    const r = await db.role.upsert({
+      where: { name: `TM-${name}` },
+      update: { permissions: JSON.stringify(def.permissions), fieldRules: JSON.stringify(def.fieldRules) },
+      create: {
         name: `TM-${name}`, description: def.description,
         permissions: JSON.stringify(def.permissions), fieldRules: JSON.stringify(def.fieldRules),
       },
-    }));
+    });
     roles[name] = r.id;
   }
   const project = await db.project.create({
@@ -77,7 +79,7 @@ beforeAll(async () => {
   users.sa = sa.id;
 
   fx = {
-    project: { id: project.id, key: project.key, hoursPerDay: 8, pointScale: [1, 2, 3, 5, 8, 13, 21] },
+    project: { id: project.id, key: project.key, hoursPerDay: 8 },
     S: { todo: todo.id, prog: prog.id, review: review.id, reopen: reopen.id, done: done.id },
     users,
   };

@@ -8,6 +8,7 @@ import AssignStepDialog from "@/components/AssignStepDialog";
 import TaskMenu from "@/components/TaskMenu";
 import ScrollableList from "@/components/ScrollableList";
 import { userOptionLabel } from "@/lib/memberLabel";
+import { buildTaskNotes, filterVisibleNotes } from "@/lib/notes";
 import { IconX } from "@/components/icons";
 
 interface Props {
@@ -36,6 +37,8 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
   const [activities, setActivities] = useState<unknown[]>([]);
   const [comment, setComment] = useState("");
   const [commentKind, setCommentKind] = useState("comment");
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteText, setEditingNoteText] = useState("");
   const [saving, setSaving] = useState("");
   const [justSaved, setJustSaved] = useState(false);
   const [err, setErr] = useState("");
@@ -122,6 +125,34 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
     }
   }
 
+  async function saveNote(id: string) {
+    if (!editingNoteText.trim()) return;
+    try {
+      await api(`/api/projects/${projectId}/tasks/${taskId}/comments/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ body: editingNoteText }),
+      });
+      setEditingNoteId(null);
+      setEditingNoteText("");
+      await loadDetail();
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not edit note.");
+    }
+  }
+
+  async function deleteNote(id: string) {
+    if (!window.confirm("Delete this note? This cannot be undone.")) return;
+    try {
+      await api(`/api/projects/${projectId}/tasks/${taskId}/comments/${id}`, { method: "DELETE" });
+      setEditingNoteId(null);
+      await loadDetail();
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not delete note.");
+    }
+  }
+
   // Store row wins (live); detail fills in until the store has loaded.
   const t: Record<string, unknown> | null = (storeTask as Record<string, unknown> | undefined) ?? detail;
   const comments = (t?.comments as { id: string; kind: string; body: string; author: { name: string }; createdAt: string }[] | undefined) ?? [];
@@ -172,7 +203,7 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
       aria-label="Task details"
     >
       <div
-        className="flex h-full w-full max-w-lg flex-col bg-surface shadow-2xl sm:rounded-l-xl"
+        className="glass-strong flex h-full w-full max-w-lg flex-col shadow-2xl sm:rounded-l-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Fixed header: identifier + type + title + actions (never scrolls away). */}
@@ -187,6 +218,11 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
                   >
                     {String(t.key)}
                   </span>
+                   {Boolean(t.projectName) && (
+                     <span className="text-muted" title={String(t.projectName)}>
+                       · {String(t.projectName)}
+                     </span>
+                   )}
                   {typeInfo && (
                     <span className="inline-flex min-w-0 items-center gap-1 rounded border border-line px-1.5 py-0.5 text-muted" title={`Issue type: ${typeInfo.name}`}>
                       <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: typeInfo.color }} aria-hidden="true" />
@@ -205,7 +241,26 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
                     className="tt-input mt-1.5 font-semibold"
                   />
                 ) : (
+                  <>
                   <h2 className="mt-1.5 break-words text-base font-semibold leading-snug">{String(t.title)}</h2>
+                 <label className="mt-1 flex items-center gap-2 text-[11px] text-muted">
+                   <input
+                     type="checkbox"
+                     checked={Boolean(t.assignedBy)}
+                     disabled={!(m.isSuperAdmin || m.perms.assign === true) || saving !== ""}
+                     onChange={(e) => void patch({ assignedByToggle: e.target.checked }, "assigned by")}
+                     aria-label="Assigned by"
+                   />
+                   <span>
+                     Assigned by:{" "}
+                     {(() => {
+                       const ab = t.assignedBy as { name: string; deletedAt: string | null } | null;
+                       return ab ? `${ab.name}${ab.deletedAt ? " (removed)" : ""}` : "—";
+                     })()}
+                     {t.assignedAt ? ` · ${new Date(String(t.assignedAt)).toLocaleString()}` : ""}
+                   </span>
+                 </label>
+                    </>
                 )}
               </>
             ) : (
@@ -256,7 +311,7 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
                 {sel("Issue Type", t.typeId as string | null, lookups.issueTypes, (v) => patch({ typeId: v }, "issue type"), rule("type") !== "editable")}
                 {sel("Assignee", t.assigneeId as string | null, lookups.members.map((x) => ({ id: x.userId, name: userOptionLabel(x) })), (v) => patch({ assigneeId: v }, "assignee"), !(can("assign") || can("edit_task_own")))}
                 {sel("Tested By", t.testedById as string | null, lookups.members.map((x) => ({ id: x.userId, name: userOptionLabel(x) })), (v) => patch({ testedById: v }, "tester"), rule("testedBy") !== "editable")}
-                {sel("Project Name", t.epicId as string | null, lookups.epics, (v) => patch({ epicId: v }, "epic"), rule("epic") !== "editable")}
+                {sel("Epic", t.epicId as string | null, lookups.epics, (v) => patch({ epicId: v }, "epic"), rule("epic") !== "editable")}
               </div>
             </section>
 
@@ -316,23 +371,57 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
 
             <section className="mb-4 border-t border-line pt-3">
               <h3 className={sectionTitle}>Comments / Remarks / Feedback</h3>
-              <ScrollableList
-                items={comments}
-                label="Comments"
-                emptyText="No comments yet."
-                maxH="max-h-48"
-                renderItem={(c) => {
-                  const cm = c as { id: string; kind: string; body: string; author: { name: string }; createdAt: string };
-                  return (
-                    <div className="rounded-md border border-line bg-canvas p-2">
-                      <span className="mr-1 rounded bg-line px-1">{cm.kind}</span>
-                      <strong>{cm.author.name}</strong>{" "}
-                      <span className="text-muted">{new Date(cm.createdAt).toLocaleString()}</span>
-                      <div className="mt-0.5 whitespace-pre-wrap">{cm.body}</div>
-                    </div>
-                  );
-                }}
-              />
+              {(() => {
+                const visibleComments = filterVisibleNotes(comments, m.fieldRules);
+                const notes = buildTaskNotes(visibleComments as { id: string; kind: string; body: string; createdAt: string; author: { name: string; deletedAt: string | null } | null }[]);
+                if (notes.length === 0) return <p className="text-xs text-muted">No comments yet.</p>;
+                return (
+                  <div className="max-h-48 space-y-2 overflow-y-auto">
+                    {notes.map((n) => (
+                      <div key={n.id} className="rounded-md border border-line bg-canvas p-2">
+                        <div className="flex items-center gap-1 text-xs">
+                          <span className="mr-1 rounded bg-line px-1">{n.type}</span>
+                          <strong>{n.n}.</strong> <strong>{n.author}{n.authorDeleted ? " (removed)" : ""}</strong>{" "}
+                          <span className="text-muted">{new Date(n.createdAt).toLocaleString()}</span>
+                          <span className="ml-auto flex gap-1">
+                            <button
+                              type="button"
+                              className="rounded border border-line px-1.5 py-0.5 text-[10px]"
+                              onClick={() => { setEditingNoteId(n.id); setEditingNoteText(n.text); }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded border border-red-300 px-1.5 py-0.5 text-[10px] text-red-600"
+                              onClick={() => void deleteNote(n.id)}
+                            >
+                              Delete
+                            </button>
+                          </span>
+                        </div>
+                        {editingNoteId === n.id ? (
+                          <div className="mt-1">
+                            <textarea
+                              value={editingNoteText}
+                              onChange={(e) => setEditingNoteText(e.target.value)}
+                              rows={3}
+                              className="tt-input w-full text-sm"
+                              aria-label={`Edit note ${n.n}`}
+                            />
+                            <div className="mt-1 flex gap-1">
+                              <button type="button" onClick={() => void saveNote(n.id)} className="rounded bg-accent px-2 py-0.5 text-[11px] font-semibold text-white">Save</button>
+                              <button type="button" onClick={() => { setEditingNoteId(null); setEditingNoteText(""); }} className="rounded border border-line px-2 py-0.5 text-[11px]">Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="mt-0.5 whitespace-pre-wrap text-sm">{n.text}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
               <div className="mt-2 flex gap-1.5">
                 <select value={commentKind} onChange={(e) => setCommentKind(e.target.value)}
                   className="w-24 shrink-0 rounded-md border border-line bg-surface px-1.5 py-1 text-xs">
@@ -354,7 +443,29 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
                 emptyText="No activity yet."
                 maxH="max-h-64"
                 renderItem={(a) => {
-                  const act = a as { id: string; action: string; field: string | null; before: string | null; after: string | null; createdAt: string; actor: { name: string } | null };
+                  const act = a as {
+                    id: string; action: string; field: string | null; before: string | null; after: string | null;
+                    beforeName?: string | null; afterName?: string | null; meta?: string | null;
+                    createdAt: string; actor: { name: string } | null;
+                  };
+                  // PHASE 4: assignment events ("task.assigned", plus legacy
+                  // "task.updated" rows for the assignee field) render with the
+                  // resolved names and the automation tag, not raw user ids.
+                  const isAssign = act.action === "task.assigned" || (act.action === "task.updated" && act.field === "assigneeId");
+                  if (isAssign) {
+                    let via = "";
+                    try {
+                      const meta = JSON.parse(act.meta ?? "{}") as { via?: string };
+                      if (meta.via) via = ` · ${meta.via}`;
+                    } catch { /* legacy rows have no meta */ }
+                    const to = act.after ? `assigned to ${act.afterName ?? "someone"}` : "unassigned";
+                    const from = act.before ? ` (was ${act.beforeName ?? "someone"})` : "";
+                    return (
+                      <span className="text-muted">
+                        {new Date(act.createdAt).toLocaleString()} — {act.actor?.name ?? "system"} {to}{from}{via}
+                      </span>
+                    );
+                  }
                   return (
                     <span className="text-muted">
                       {new Date(act.createdAt).toLocaleString()} — {act.actor?.name ?? "system"} {act.action}

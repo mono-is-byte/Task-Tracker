@@ -2,6 +2,10 @@ import { createHash, randomBytes } from "crypto";
 import type { PrismaClient, User } from "@prisma/client";
 import { db } from "./db";
 import { generateTempPassword, hashPassword, passwordProblems, verifyPassword } from "./password";
+import { GENDERS, USERNAME_CHANGE_DAILY_LIMIT, isGender, usernameProblems } from "./accountRules";
+import { audit, AUDIT_RETENTION, pruneAuditLog } from "./audit";
+
+export { GENDERS, isGender, usernameProblems };
 
 export const COOKIE_NAME = "tt_session";
 export const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12h
@@ -10,35 +14,37 @@ export const IDLE_TTL_MS = 2 * 60 * 60 * 1000; // 2h idle
 export const LOCKOUT_THRESHOLD = 5;
 export const LOCKOUT_WINDOW_MIN = 15;
 export const LOCKOUT_MINUTES = 15;
+/** PHASE 6a: login attempts older than this are housekeeping and get pruned. */
+export const LOGIN_ATTEMPT_TTL_MS = 24 * 60 * 60 * 1000;
 
 export type Db = PrismaClient;
+
+/**
+ * PHASE 6a — `LoginAttempt` is not a log feed, it is the 15-minute lockout
+ * window. It must never be capped, but rows past {@link LOGIN_ATTEMPT_TTL_MS}
+ * can never influence a lockout again, so every login trims them
+ * (best-effort: housekeeping must never fail a login).
+ */
+async function pruneLoginAttempts(client: Db): Promise<void> {
+  try {
+    await client.loginAttempt.deleteMany({
+      where: { createdAt: { lt: new Date(Date.now() - LOGIN_ATTEMPT_TTL_MS) } },
+    });
+  } catch {
+    // Never bubble.
+  }
+}
 
 export function sha256(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
-export async function audit(
-  client: Db,
-  opts: {
-    actorId?: string | null;
-    action: string;
-    entity?: string;
-    entityId?: string;
-    meta?: unknown;
-    ip?: string;
-  },
-) {
-  await client.auditLog.create({
-    data: {
-      actorId: opts.actorId ?? null,
-      action: opts.action,
-      entity: opts.entity ?? null,
-      entityId: opts.entityId ?? null,
-      meta: JSON.stringify(opts.meta ?? {}),
-      ip: opts.ip ?? null,
-    },
-  });
-}
+/**
+ * PHASE 6: the audit writer now lives in `src/lib/audit.ts`, where it also
+ * prunes the table back to the newest 25 rows. Re-exported here so every
+ * existing `@/lib/auth` import keeps working unchanged.
+ */
+export { AUDIT_RETENTION, audit, pruneAuditLog };
 
 export function sessionCookieHeader(token: string, opts: { rememberMe: boolean; secure: boolean }): string {
   const maxAge = Math.floor((opts.rememberMe ? REMEMBER_TTL_MS : SESSION_TTL_MS) / 1000);
@@ -150,6 +156,7 @@ export async function login(client: Db, input: LoginInput) {
   const identifier = input.identifier.trim().toLowerCase();
   const fail = async (error: string, extra?: { code?: string }): Promise<{ ok: false; error: string; code?: string }> => {
     await client.loginAttempt.create({ data: { identifier, ip: input.ip ?? null, success: false } });
+    await pruneLoginAttempts(client);
     return { ok: false as const, error, ...extra };
   };
 
@@ -183,6 +190,7 @@ export async function login(client: Db, input: LoginInput) {
 
   await client.user.update({ where: { id: user.id }, data: { failedLogins: 0, lockedUntil: null } });
   await client.loginAttempt.create({ data: { identifier, ip: input.ip ?? null, success: true } });
+  await pruneLoginAttempts(client);
   const { token } = await createSession(client, user.id, {
     rememberMe: input.rememberMe,
     ip: input.ip,
@@ -313,6 +321,75 @@ export async function changeEmail(
   return { ok: true as const, user: updated };
 }
 
+/**
+ * Self-service username change (change request Phase 2). Like `changeEmail`,
+ * the account id and everything attached to it stay; only the login NAME
+ * changes. Requires the current password, rejects anything that fails
+ * `usernameProblems`, enforces case-insensitive uniqueness against BOTH
+ * usernames and emails (soft-deleted accounts included — their `username`
+ * column is still occupied), records an AuditLog old→new entry and is limited
+ * to `USERNAME_CHANGE_DAILY_LIMIT` changes per rolling 24 hours.
+ */
+export async function changeUsername(
+  client: Db,
+  userId: string,
+  input: { username: string; password: string },
+  ip?: string,
+) {
+  const user = await client.user.findUnique({ where: { id: userId } });
+  if (!user) return { ok: false as const, error: "User not found.", code: "not_found" as const };
+  if (!(await verifyPassword(input.password, user.passwordHash))) {
+    return { ok: false as const, error: "Current password is incorrect.", code: "reauth" as const };
+  }
+
+  // Rate limit — counted from the audit log so it survives restarts and works
+  // on serverless hosts with no in-process state.
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const recent = await client.auditLog.count({
+    where: { actorId: userId, action: "auth.username_change", createdAt: { gte: since } },
+  });
+  if (recent >= USERNAME_CHANGE_DAILY_LIMIT) {
+    return {
+      ok: false as const,
+      error: `You can change your username at most ${USERNAME_CHANGE_DAILY_LIMIT} times per day.`,
+      code: "rate_limit" as const,
+    };
+  }
+
+  const username = input.username.trim().toLowerCase();
+  const problems = usernameProblems(username);
+  if (problems.length > 0) {
+    return { ok: false as const, error: `Username needs ${problems.join(", ")}.`, code: "invalid" as const };
+  }
+  if (username === user.username.toLowerCase()) {
+    return { ok: false as const, error: "That is already your username.", code: "unchanged" as const };
+  }
+  const clash = await client.user.findFirst({
+    where: { id: { not: userId }, OR: [{ username }, { email: username }] },
+    select: { email: true, username: true },
+  });
+  if (clash) {
+    return {
+      ok: false as const,
+      error:
+        clash.username === username
+          ? "That username is already taken."
+          : "That name is already used as another account's email address.",
+      code: "conflict" as const,
+    };
+  }
+  const updated = await client.user.update({ where: { id: userId }, data: { username } });
+  await audit(client, {
+    actorId: userId,
+    action: "auth.username_change",
+    entity: "user",
+    entityId: userId,
+    meta: { before: user.username, after: username },
+    ip,
+  });
+  return { ok: true as const, user: updated };
+}
+
 /** Admin-triggered reset: sets a temp password, forces change on next login. Returns the temp password. */
 export async function adminResetPassword(client: Db, adminId: string, userId: string, ip?: string) {
   const temp = generateTempPassword();
@@ -337,6 +414,8 @@ export async function createUser(
     email: string; username: string; name: string; isSuperAdmin?: boolean;
     /** Designation = a Role id (the route validates it exists before calling). */
     designation?: string | null;
+    /** Change request Phase 2: optional gender. */
+    gender?: string | null;
   },
   ip?: string,
 ) {
@@ -351,6 +430,7 @@ export async function createUser(
       mustChangePassword: true,
       isSuperAdmin: input.isSuperAdmin ?? false,
       designation,
+      gender: input.gender?.trim() || null,
     },
   });
   await audit(client, { actorId: adminId, action: "user.create", entity: "user", entityId: user.id, ip });

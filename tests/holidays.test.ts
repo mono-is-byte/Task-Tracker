@@ -210,6 +210,25 @@ describe("updateHoliday / deleteHoliday", () => {
     expect(log?.actorId).toBe(fx.users.admin);
   });
 
+  it("a no-op save writes no audit row (PHASE 6b)", async () => {
+    const admin = { id: fx.users.admin, isSuperAdmin: true };
+    const name = uniq("H NoChange");
+    const created = await createHoliday(db, admin, { startDate: "2026-09-01", name });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const same = await updateHoliday(db, admin, created.holiday.id, {
+      startDate: created.holiday.startDate,
+      endDate: created.holiday.endDate,
+      name: created.holiday.name,
+      description: created.holiday.description,
+      type: created.holiday.type,
+    });
+    expect(same.ok).toBe(true);
+    // A fresh holiday id can have no prior holiday.update rows: zero means the
+    // no-op save skipped both the write and the audit entry.
+    expect(await db.auditLog.count({ where: { action: "holiday.update", entityId: created.holiday.id } })).toBe(0);
+  });
+
   it("can extend a single day into a range and reject an invalid one", async () => {
     const admin = { id: fx.users.admin, isSuperAdmin: true };
     const name = uniq("H Extend");

@@ -57,7 +57,7 @@ function LoginForm() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-canvas p-4">
-      <div className="grid w-full max-w-4xl overflow-hidden rounded-2xl border border-line bg-surface shadow-xl md:grid-cols-2">
+      <div className="glass-strong grid w-full max-w-4xl overflow-hidden rounded-2xl border border-line shadow-xl md:grid-cols-2">
         {/* Brand panel — hidden on small screens, full panel from md up. */}
         <div className="hidden flex-col justify-between bg-accent p-8 text-white md:flex dark:bg-indigo-950">
           <div>

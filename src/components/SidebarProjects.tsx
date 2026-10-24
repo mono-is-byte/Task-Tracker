@@ -248,7 +248,7 @@ export default function SidebarProjects({ projects, canCreate }: { projects: Sid
                 menuRef.current = el;
                 if (el) setMenuHeight(el.offsetHeight);
               }}
-              className="fixed z-50 w-36 rounded border border-line bg-surface py-1 text-xs shadow-lg"
+              className="glass-strong fixed z-50 w-36 rounded border border-line py-1 text-xs shadow-lg"
               style={{
                 right: `${window.innerWidth - (menuRect?.right ?? 0)}px`,
                 top: menuUp ? `${(menuRect?.top ?? 0) - menuHeight - 4}px` : `${(menuRect?.bottom ?? 0) + 4}px`,

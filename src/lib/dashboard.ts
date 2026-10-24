@@ -158,5 +158,22 @@ export async function dashboardLists(client: PrismaClient, userId: string, proje
       take: 10,
     }),
   ]);
-  return { assigned, qaQueue, overdue, recent };
+  // PHASE 4: assignment events store raw user ids in before/after — resolve the
+  // new assignee's name so the dashboard feed can read "assigned to Rahim".
+  const assignIds = new Set<string>();
+  for (const a of recent) {
+    if (a.action === "task.assigned" || (a.action === "task.updated" && a.field === "assigneeId")) {
+      if (a.after) assignIds.add(a.after);
+    }
+  }
+  const assignUsers = assignIds.size > 0
+    ? await client.user.findMany({ where: { id: { in: [...assignIds] } }, select: { id: true, name: true, deletedAt: true } })
+    : [];
+  const assignNames = new Map(assignUsers.map((u) => [u.id, u.deletedAt ? `${u.name} (removed)` : u.name]));
+  const recentOut = recent.map((a) =>
+    a.action === "task.assigned" || (a.action === "task.updated" && a.field === "assigneeId")
+      ? { ...a, afterName: a.after ? assignNames.get(a.after) ?? null : null }
+      : a,
+  );
+  return { assigned, qaQueue, overdue, recent: recentOut };
 }

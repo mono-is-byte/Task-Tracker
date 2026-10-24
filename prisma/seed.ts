@@ -53,7 +53,7 @@ async function wipe() {
   const tables = [
     "TaskStageTime",
     "Notification", "SavedView", "Activity", "Comment", "TaskLink", "Task",
-    "Story", "Sprint", "Epic", "AutomationRule", "CustomField", "StatusTransition",
+    "Epic", "AutomationRule", "CustomField", "StatusTransition",
     "Status", "Priority", "IssueType", "ProjectMember", "Role", "Holiday",
     "PasswordReset", "LoginAttempt", "Session", "AuditLog", "User", "Project",
   ];
@@ -218,27 +218,14 @@ async function main() {
     epics[name] = e.id;
   }
 
-  const stories: Record<string, string> = {};
-  async function mkStory(projectId: string, key: string, title: string, description: string, epic?: string) {
-    const s = await db.story.create({
-      data: { projectId, title, description, epicId: epic ? epics[epic] : null },
-    });
-    stories[key] = s.id;
-  }
-  await mkStory(map.id, "div", "ম্যাপে বিভাগগুলো প্রদর্শন", "বাংলাদেশের সব বিভাগ ম্যাপে রঙসহ দেখাতে হবে।", "Bangladesh Map Integration");
-  await mkStory(map.id, "zoom", "জুম করলে জেলার বিস্তারিত দেখা", "জুম-ইন করলে সংশ্লিষ্ট জেলার তথ্য পপ-আপে দেখাবে।", "Bangladesh Map Integration");
-  await mkStory(map.id, "epz", "কুমিল্লা EPZ প্লট ম্যাপে overlay", "EPZ-এর প্লটগুলো সীমানাসহ ম্যাপে দেখাতে হবে।", "Cumilla EPZ Map");
-  await mkStory(map.id, "bepza", "BEPZA জোনের সীমানা ইমপোর্ট", "শেপ ফাইল থেকে জোনের সীমানা ইমপোর্ট করতে হবে।", "BEPZA Economic Zone Map");
-  await mkStory(lvm.id, "sms", "চিঠি ইস্যু হওয়ার সাথে সাথে প্রাপককে জানাতে একটি স্বয়ংক্রিয় এসএমএস/ইমেইল ব্যবস্থা প্রয়োজন", "ইস্যুর সাথে সাথে প্রাপকের মোবাইলে SMS ও ইমেইলে ইমেইল যাবে।", "Letter View Management System");
-  await mkStory(lvm.id, "inbox", "চিঠির ইনবক্স তালিকা", "অবস্থাভেদে ফিল্টারসহ চিঠির তালিকা দেখাবে।", "Letter View Management System");
-  await mkStory(nm.id, "apply", "নেট মিটারিং আবেদন অনলাইনে গ্রহণ", "গ্রাহক অনলাইনে আবেদন করবে ও ট্র্যাক করতে পারবে।", "Net Metering");
+  // (Story feature removed in Phase 11; epics remain the parent grouping.)
 
   let serial = 0;
   async function mkTask(projectId: string, input: {
-    title: string; description?: string; storyPoints?: number | null; estHours?: number | null;
+    title: string; description?: string; estHours?: number | null;
     priority: string; status: string; assignee?: string; testedBy?: string;
     startDate?: string; endDate?: string; gitBranch?: string;
-    epic?: string; story?: string; labels?: string[]; rdTime?: number; type?: string;
+    epic?: string; labels?: string[]; rdTime?: number; type?: string;
   }) {
     const R = projectId === map.id ? mapRefs : projectId === lvm.id ? lvmRefs : nmRefs;
     serial = projectId === map.id ? serial : serial; // serials unique per project below
@@ -248,7 +235,7 @@ async function main() {
         projectId, serial: count + 1,
         typeId: R.Ty[input.type ?? "Task"].id,
         title: input.title, description: input.description ?? null,
-        storyPoints: input.storyPoints ?? null, estHours: input.estHours ?? null,
+        estHours: input.estHours ?? null,
         rdTime: input.rdTime ?? 0,
         priorityId: R.P[input.priority].id, statusId: R.S[input.status].id,
         assigneeId: input.assignee ? userIds[input.assignee] : null,
@@ -257,7 +244,6 @@ async function main() {
         endDate: input.endDate ? new Date(input.endDate) : null,
         gitBranch: input.gitBranch ?? null,
         epicId: input.epic ? epics[input.epic] : null,
-        storyId: input.story ? stories[input.story] : null,
         labels: JSON.stringify(input.labels ?? []),
         position: count,
       },
@@ -266,31 +252,31 @@ async function main() {
   }
 
   // MAP tasks
-  await mkTask(map.id, { title: "Render division boundaries on map", description: "ম্যাপে বিভাগগুলো প্রদর্শন — রঙ ও লেবেলসহ।", storyPoints: 5, estHours: 12, priority: "High", status: "Done", assignee: "saju", testedBy: "sumit", startDate: "2026-08-04", endDate: "2026-08-10", gitBranch: "feature/map-divisions", epic: "Bangladesh Map Integration", story: "div" });
-  await mkTask(map.id, { title: "District drill-down on click", description: "Clicking a division zooms to its districts.", storyPoints: 8, estHours: 20, priority: "Highest", status: "Done", assignee: "shovon", testedBy: "sumit", startDate: "2026-08-05", endDate: "2026-08-14", gitBranch: "feature/district-drilldown", epic: "Bangladesh Map Integration", story: "zoom" });
-  await mkTask(map.id, { title: "EPZ marker clustering", storyPoints: 5, estHours: 14, priority: "High", status: "In Testing", assignee: "saju", testedBy: "apon", startDate: "2026-09-29", gitBranch: "feature/epz-clustering", epic: "Cumilla EPZ Map", story: "epz" });
-  const tReopen = await mkTask(map.id, { title: "Map legend localization", description: "লেজেন্ডে বাংলা লেবেল দেখাতে হবে।", storyPoints: 3, estHours: 8, priority: "Medium", status: "Re-open", assignee: "shovon", testedBy: "sumit", startDate: "2026-09-30", gitBranch: "feature/legend-bn", epic: "Cumilla EPZ Map" });
-  await mkTask(map.id, { title: "Export map as image", storyPoints: 3, estHours: 10, priority: "Medium", status: "Development Done", assignee: "saju", testedBy: "apon", startDate: "2026-10-01", gitBranch: "feature/map-export", epic: "Cumilla EPZ Map" });
-  await mkTask(map.id, { title: "Cumilla EPZ plot overlay", description: "কুমিল্লা EPZ প্লট overlay — R&D সহ সময় লাগছে।", storyPoints: 5, estHours: 16, rdTime: 6, priority: "Highest", status: "In Progress", assignee: "shovon", startDate: "2026-10-05", gitBranch: "feature/epz-overlay", epic: "Cumilla EPZ Map", story: "epz" });
+  await mkTask(map.id, { title: "Render division boundaries on map", description: "ম্যাপে বিভাগগুলো প্রদর্শন — রঙ ও লেবেলসহ।", estHours: 12, priority: "High", status: "Done", assignee: "saju", testedBy: "sumit", startDate: "2026-08-04", endDate: "2026-08-10", gitBranch: "feature/map-divisions", epic: "Bangladesh Map Integration" });
+  await mkTask(map.id, { title: "District drill-down on click", description: "Clicking a division zooms to its districts.", estHours: 20, priority: "Highest", status: "Done", assignee: "shovon", testedBy: "sumit", startDate: "2026-08-05", endDate: "2026-08-14", gitBranch: "feature/district-drilldown", epic: "Bangladesh Map Integration" });
+  await mkTask(map.id, { title: "EPZ marker clustering", estHours: 14, priority: "High", status: "In Testing", assignee: "saju", testedBy: "apon", startDate: "2026-09-29", gitBranch: "feature/epz-clustering", epic: "Cumilla EPZ Map" });
+  const tReopen = await mkTask(map.id, { title: "Map legend localization", description: "লেজেন্ডে বাংলা লেবেল দেখাতে হবে।", estHours: 8, priority: "Medium", status: "Re-open", assignee: "shovon", testedBy: "sumit", startDate: "2026-09-30", gitBranch: "feature/legend-bn", epic: "Cumilla EPZ Map" });
+  await mkTask(map.id, { title: "Export map as image", estHours: 10, priority: "Medium", status: "Development Done", assignee: "saju", testedBy: "apon", startDate: "2026-10-01", gitBranch: "feature/map-export", epic: "Cumilla EPZ Map" });
+  await mkTask(map.id, { title: "Cumilla EPZ plot overlay", description: "কুমিল্লা EPZ প্লট overlay — R&D সহ সময় লাগছে।", estHours: 16, rdTime: 6, priority: "Highest", status: "In Progress", assignee: "shovon", startDate: "2026-10-05", gitBranch: "feature/epz-overlay", epic: "Cumilla EPZ Map" });
   await mkTask(map.id, { title: "Search location by name (Bangla)", description: "বাংলা নামে লোকেশন সার্চ।", estHours: 6, priority: "High", status: "In Progress", assignee: "saju", startDate: "2026-10-08", epic: "Bangladesh Map Integration" });
-  await mkTask(map.id, { title: "Print-friendly map layout", storyPoints: 2, estHours: 6, priority: "Low", status: "To Do", epic: "Cumilla EPZ Map" });
+  await mkTask(map.id, { title: "Print-friendly map layout", estHours: 6, priority: "Low", status: "To Do", epic: "Cumilla EPZ Map" });
   await mkTask(map.id, { title: "Offline tile caching", estHours: 10, priority: "Low", status: "To Do", epic: "BEPZA Economic Zone Map" });
-  const tZone = await mkTask(map.id, { title: "BEPZA zone boundary import", description: "শেপ ফাইল থেকে জোনের সীমানা ইমপোর্ট।", storyPoints: 8, estHours: 24, priority: "Highest", status: "In Testing", assignee: "saju", testedBy: "sumit", startDate: "2026-10-06", gitBranch: "feature/zone-import", epic: "BEPZA Economic Zone Map", story: "bepza" });
+  const tZone = await mkTask(map.id, { title: "BEPZA zone boundary import", description: "শেপ ফাইল থেকে জোনের সীমানা ইমপোর্ট।", estHours: 24, priority: "Highest", status: "In Testing", assignee: "saju", testedBy: "sumit", startDate: "2026-10-06", gitBranch: "feature/zone-import", epic: "BEPZA Economic Zone Map" });
   await mkTask(map.id, { title: "Project setup & repo branching", estHours: 4, priority: "Medium", status: "Done", assignee: "shovon", testedBy: "sumit", startDate: "2026-08-03", endDate: "2026-08-03", epic: "Bangladesh Map Integration" });
-  const tColor = await mkTask(map.id, { title: "Color-code zones by status", storyPoints: 3, estHours: 9, priority: "Medium", status: "To Do", assignee: "saju", epic: "BEPZA Economic Zone Map", story: "bepza" });
+  const tColor = await mkTask(map.id, { title: "Color-code zones by status", estHours: 9, priority: "Medium", status: "To Do", assignee: "saju", epic: "BEPZA Economic Zone Map" });
   await db.taskLink.create({ data: { fromId: tColor.id, toId: tZone.id, kind: "blocks" } });
 
   // LVM tasks
-  await mkTask(lvm.id, { title: "Letter inbox list with status", description: "চিঠির ইনবক্স তালিকা — অবস্থাভেদে ফিল্টার।", storyPoints: 5, estHours: 12, priority: "High", status: "Done", assignee: "saju", testedBy: "apon", startDate: "2026-09-28", endDate: "2026-10-02", gitBranch: "feature/letter-inbox", epic: "Letter View Management System", story: "inbox" });
-  await mkTask(lvm.id, { title: "Auto SMS on letter issue", description: "চিঠি ইস্যু হওয়ার সাথে সাথে প্রাপককে SMS/ইমেইল।", storyPoints: 8, estHours: 20, priority: "Highest", status: "Development Done", assignee: "shovon", testedBy: "sumit", startDate: "2026-10-03", gitBranch: "feature/letter-sms", epic: "Letter View Management System", story: "sms" });
-  await mkTask(lvm.id, { title: "Letter view with attachments", storyPoints: 5, estHours: 15, priority: "High", status: "In Progress", assignee: "saju", startDate: "2026-10-07", epic: "Letter View Management System", story: "inbox" });
+  await mkTask(lvm.id, { title: "Letter inbox list with status", description: "চিঠির ইনবক্স তালিকা — অবস্থাভেদে ফিল্টার।", estHours: 12, priority: "High", status: "Done", assignee: "saju", testedBy: "apon", startDate: "2026-09-28", endDate: "2026-10-02", gitBranch: "feature/letter-inbox", epic: "Letter View Management System" });
+  await mkTask(lvm.id, { title: "Auto SMS on letter issue", description: "চিঠি ইস্যু হওয়ার সাথে সাথে প্রাপককে SMS/ইমেইল।", estHours: 20, priority: "Highest", status: "Development Done", assignee: "shovon", testedBy: "sumit", startDate: "2026-10-03", gitBranch: "feature/letter-sms", epic: "Letter View Management System" });
+  await mkTask(lvm.id, { title: "Letter view with attachments", estHours: 15, priority: "High", status: "In Progress", assignee: "saju", startDate: "2026-10-07", epic: "Letter View Management System" });
   await mkTask(lvm.id, { title: "Role-based letter visibility", estHours: 8, priority: "Medium", status: "To Do", epic: "Letter View Management System" });
 
   // NM tasks
-  await mkTask(nm.id, { title: "Net metering application form", storyPoints: 5, estHours: 14, priority: "High", status: "In Testing", assignee: "shovon", testedBy: "apon", startDate: "2026-10-06", gitBranch: "feature/nm-apply", epic: "Net Metering", story: "apply" });
-  await mkTask(nm.id, { title: "Meter reading import (CSV)", storyPoints: 3, estHours: 10, priority: "Medium", status: "To Do", assignee: "saju", epic: "Net Metering" });
+  await mkTask(nm.id, { title: "Net metering application form", estHours: 14, priority: "High", status: "In Testing", assignee: "shovon", testedBy: "apon", startDate: "2026-10-06", gitBranch: "feature/nm-apply", epic: "Net Metering" });
+  await mkTask(nm.id, { title: "Meter reading import (CSV)", estHours: 10, priority: "Medium", status: "To Do", assignee: "saju", epic: "Net Metering" });
   await mkTask(nm.id, { title: "Billing calculation engine", estHours: 18, priority: "Highest", status: "In Progress", assignee: "shovon", startDate: "2026-10-09", epic: "Net Metering" });
-  await mkTask(nm.id, { title: "Consumer SMS notification", storyPoints: 2, estHours: 6, priority: "Low", status: "To Do", epic: "Net Metering" });
+  await mkTask(nm.id, { title: "Consumer SMS notification", estHours: 6, priority: "Low", status: "To Do", epic: "Net Metering" });
 
   // comments: remarks + feedback threads
   const overlay = await db.task.findFirstOrThrow({ where: { projectId: map.id, title: "Cumilla EPZ plot overlay" } });

@@ -4,8 +4,9 @@ import { cache } from "react";
 import type { User } from "@prisma/client";
 import { COOKIE_NAME, getSessionUser } from "./auth";
 import { db, taskKey } from "./db";
-import { getMembership, type Membership } from "./permissions";
+import { getMembership, safeArr, type Membership } from "./permissions";
 import { listAssignableUsers, type DirectoryUser } from "./userDirectory";
+import type { TransitionRule } from "./workflow";
 
 export { taskKey };
 
@@ -32,11 +33,15 @@ export async function requireViewer(next?: string): Promise<{ user: User; sessio
 export interface ProjectContext {
   project: {
     id: string; key: string; name: string; description: string | null;
-    hoursPerDay: number; workingDays: number[]; pointScale: number[];
+    hoursPerDay: number; workingDays: number[];
     bannerNote: string | null; settings: Record<string, unknown>; isHidden: boolean;
   };
   membership: Membership;
-  statuses: { id: string; name: string; category: string; color: string; position: number; designationTags: string[] }[];
+  statuses: { id: string; name: string; category: string; color: string; position: number; designationRoleIds: string[] }[];
+  /** The project's configured status transitions (role/type ids already parsed).
+   *  The same rows the server enforces; the board uses them to grey out invalid
+   *  drop columns. */
+  transitions: TransitionRule[];
   priorities: { id: string; name: string; level: number; color: string }[];
   issueTypes: { id: string; name: string; color: string }[];
   /** Every valid (non-deleted) user, one entry per user id. `isMember` marks the
@@ -65,7 +70,7 @@ export async function loadProject(projectId: string, userId: string, isSuperAdmi
     getMembership(db, userId, isSuperAdmin, projectId),
   ]);
   if (!project || !membership) return null;
-  const [statuses, priorities, issueTypes, members, epics, customFields, designationTags] = await Promise.all([
+  const [statuses, priorities, issueTypes, members, epics, customFields, designationTags, transitions] = await Promise.all([
     db.status.findMany({ where: { projectId }, orderBy: { position: "asc" } }),
     db.priority.findMany({ where: { projectId }, orderBy: { level: "desc" } }),
     db.issueType.findMany({ where: { projectId }, select: { id: true, name: true, color: true } }),
@@ -73,22 +78,31 @@ export async function loadProject(projectId: string, userId: string, isSuperAdmi
     listAssignableUsers(db, projectId),
     db.epic.findMany({ where: { projectId }, orderBy: { position: "asc" } }),
     db.customField.findMany({ where: { projectId }, orderBy: { position: "asc" } }),
-    db.statusDesignationTag.findMany({ where: { status: { projectId } }, select: { statusId: true, text: true } }),
+    db.statusDesignationTag.findMany({ where: { status: { projectId } }, select: { statusId: true, roleId: true } }),
+    db.statusTransition.findMany({
+      where: { projectId },
+      select: { fromId: true, toId: true, roleIds: true, issueTypeIds: true },
+    }),
   ]);
   const tagsByStatus: Record<string, string[]> = {};
-  for (const m of designationTags) (tagsByStatus[m.statusId] ??= []).push(m.text);
+  for (const m of designationTags) (tagsByStatus[m.statusId] ??= []).push(m.roleId);
   let settings: Record<string, unknown> = {};
   try { settings = JSON.parse(project.settings); } catch { settings = {}; }
   return {
     project: {
       id: project.id, key: project.key, name: project.name, description: project.description,
       hoursPerDay: project.hoursPerDay, workingDays: parseArr(project.workingDays, [1, 2, 3, 4, 5]),
-      pointScale: parseArr(project.pointScale, [1, 2, 3, 5, 8, 13, 21]),
       bannerNote: project.bannerNote, settings,
       isHidden: project.isHidden,
     },
     membership,
-    statuses: statuses.map((s) => ({ ...s, designationTags: tagsByStatus[s.id] ?? [] })),
+    statuses: statuses.map((s) => ({ ...s, designationRoleIds: tagsByStatus[s.id] ?? [] })),
+    transitions: transitions.map((t) => ({
+      fromId: t.fromId,
+      toId: t.toId,
+      roleIds: safeArr(t.roleIds),
+      issueTypeIds: safeArr(t.issueTypeIds),
+    })),
     priorities, issueTypes,
     members,
     epics: epics.map((e) => ({ id: e.id, name: e.name, color: e.color, status: e.status })),

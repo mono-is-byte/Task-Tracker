@@ -2,6 +2,7 @@ import { fail, requireMember } from "@/lib/api";
 import { db, taskKey } from "@/lib/db";
 import { loadProject } from "@/lib/server";
 import { TASK_CSV_COLUMNS, estDays } from "@/lib/domain";
+import { buildTaskNotes, notesAsLines } from "@/lib/notes";
 import * as XLSX from "xlsx";
 
 function fmtDate(d: Date | null | undefined): string {
@@ -32,8 +33,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     include: {
       status: true, priority: true,
       assignee: { select: { name: true } }, testedBy: { select: { name: true } },
-      epic: true, story: true,
-      comments: { where: { kind: "remark" }, orderBy: { createdAt: "asc" } },
+      assignedBy: { select: { name: true, deletedAt: true } },
+      epic: true,
+      comments: { include: { author: { select: { id: true, name: true, deletedAt: true } } }, orderBy: { createdAt: "asc" } },
       linksFrom: { include: { to: { select: { serial: true } } } },
     },
     orderBy: { serial: "asc" },
@@ -49,49 +51,35 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     return true;
   });
 
-  const rows: Record<string, string | number>[] = filtered.map((t) => ({
-    SL: t.serial,
-    Epic: t.epic?.name ?? "",
-    "User Story": t.story?.title ?? "",
-    "Task title": t.title,
-    "Story Points": t.storyPoints ?? "",
-    "Est. Hours": t.estHours ?? "",
-    "Est. Days": estDays(t.estHours, loaded.project.hoursPerDay) ?? "",
-    Description: t.description ?? "",
-    Priority: t.priority.name,
-    Status: t.status.name,
-    Assignee: t.assignee?.name ?? "",
-    "Start Date": fmtDate(t.startDate),
-    "End Date": fmtDate(t.endDate),
-    Remarks: t.comments.map((c) => c.body).join("\n---\n"),
-    "Git Branch": t.gitBranch ?? "",
-    "Tested By": t.testedBy?.name ?? "",
-    Dependency: t.linksFrom.map((l) => {
-      const target = byId.get(l.toId);
-      return target ? keyOf(target.serial) : "";
-    }).filter(Boolean).join(", "),
-    Feedback: "",
-  }));
-
-  // Feedback comments appended per task
-  const feedbacks = await db.comment.findMany({
-    where: { task: { projectId: id }, kind: "feedback" },
-    orderBy: { createdAt: "asc" },
+  const rows: Record<string, string | number>[] = filtered.map((t) => {
+    const notes = buildTaskNotes(t.comments);
+    return {
+      SL: t.serial,
+      Epic: t.epic?.name ?? "",
+      "Task title": t.title,
+      "Est. Hours": t.estHours ?? "",
+      "Est. Days": estDays(t.estHours, loaded.project.hoursPerDay) ?? "",
+      Description: t.description ?? "",
+      "Comments & notes": notesAsLines(notes).join("\n"),
+      Priority: t.priority.name,
+      Status: t.status.name,
+      "Assigned By": t.assignedBy?.name ?? "",
+      Assignee: t.assignee?.name ?? "",
+      "Tested By": t.testedBy?.name ?? "",
+      "Start Date": fmtDate(t.startDate),
+      "End Date": fmtDate(t.endDate),
+      "Git Branch": t.gitBranch ?? "",
+      Dependency: t.linksFrom.map((l) => {
+        const target = byId.get(l.toId);
+        return target ? keyOf(target.serial) : "";
+      }).filter(Boolean).join(", "),
+    };
   });
-  const fbByTask = new Map<string, string[]>();
-  for (const f of feedbacks) {
-    const arr = fbByTask.get(f.taskId) ?? [];
-    arr.push(f.body);
-    fbByTask.set(f.taskId, arr);
-  }
-  for (let i = 0; i < rows.length; i++) {
-    rows[i].Feedback = (fbByTask.get(filtered[i].id) ?? []).join("\n---\n");
-  }
 
   const ws = XLSX.utils.json_to_sheet(rows, { header: [...TASK_CSV_COLUMNS] });
   // Readable default widths so long titles/descriptions do not hide in cells.
   ws["!cols"] = TASK_CSV_COLUMNS.map((c) => ({
-    wch: c === "Task title" || c === "Description" ? 42 : c === "Remarks" || c === "Feedback" ? 32 : Math.max(10, c.length + 2),
+    wch: c === "Task title" || c === "Description" ? 42 : c === "Comments & notes" ? 32 : Math.max(10, c.length + 2),
   }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Tasks");

@@ -3,7 +3,7 @@ import { fail, ok, readJson, requireUser, clientIp } from "@/lib/api";
 import { audit } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { defaultAutomationRules } from "@/lib/automation";
-import { userHasGlobalAction } from "@/lib/permissions";
+import { parsePerms, userHasGlobalAction } from "@/lib/permissions";
 
 const CreateBody = z.object({
   key: z.string().min(1).max(10).regex(/^[A-Z0-9]+$/, "Key must be uppercase letters/digits, e.g. MAP"),
@@ -82,8 +82,15 @@ export async function POST(req: Request) {
         data: { projectId: project.id, name: r.name, trigger: r.trigger, condition: JSON.stringify(r.condition), action: JSON.stringify(r.action) },
       });
     }
-    // creator becomes Project Manager
-    const pmRole = await db.role.findUnique({ where: { name: "Project Manager" } });
+    // The creator becomes the project-manager-equivalent role. Phase 2 decision:
+    // pick it by the explicit `bypass_transitions` FLAG (id/flag based), never by
+    // the role NAME — a renamed role keeps working, and an unrelated role renamed
+    // *to* "Project Manager" cannot inherit the capability by accident. The name
+    // lookup survives only as a fallback for installs whose PM role predates it.
+    const allRoles = await db.role.findMany({ select: { id: true, name: true, permissions: true } });
+    const pmRole =
+      allRoles.find((r) => parsePerms(r.permissions).bypass_transitions === true) ??
+      allRoles.find((r) => r.name === "Project Manager");
     if (pmRole) {
       await db.projectMember.create({
         data: { projectId: project.id, userId: auth.user.id, roles: { create: [{ roleId: pmRole.id }] } },

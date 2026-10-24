@@ -9,9 +9,11 @@ import { IconClock } from "@/components/icons";
 
 interface Task {
   id: string; key: string; title: string;
-  storyPoints: number | null; estHours: number | null;
+  estHours: number | null;
   status: { name: string; color: string };
   assignee: { name: string } | null;
+  /** PHASE 4: snapshot of who assigned the task (system field). */
+  assignedBy: { name: string; deletedAt: string | null } | null;
   endDate: string | null;
 }
 
@@ -75,13 +77,17 @@ export default function ArchivePage() {
             <span className="font-mono text-xs text-slate-500">{t.key}</span>
             <button onClick={() => setDrawerId(t.id)} className="flex-1 truncate text-left hover:underline">{t.title}</button>
             <span className="inline-flex items-center gap-1 text-xs text-slate-500">
-              {t.storyPoints != null && <span title="Story points">{t.storyPoints} SP</span>}
+    
               {t.estHours != null && (
                 <span className="inline-flex items-center gap-0.5" title="Estimated hours">
                   <IconClock className="h-3 w-3" /> {t.estHours}h
                 </span>
               )}
-              <span>{t.assignee?.name ?? ""} {t.endDate ? `· done ${t.endDate.slice(0, 10)}` : ""}</span>
+              <span>
+                {t.assignee?.name ?? ""}
+                {t.assignedBy ? ` · assigned by ${t.assignedBy.name}${t.assignedBy.deletedAt ? " (removed)" : ""}` : ""}
+                {t.endDate ? ` · done ${t.endDate.slice(0, 10)}` : ""}
+              </span>
             </span>
             {canArchive && <button onClick={() => reopen(t.id)} className="rounded border px-1 text-xs">Re-open</button>}
           </li>

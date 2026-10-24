@@ -96,7 +96,7 @@ export default function NotificationsBell() {
         <div
           ref={panelRef}
           style={{ position: "fixed", top: pos.top, left: pos.left, width: PANEL_W }}
-          className="z-[70] max-h-80 overflow-auto rounded border border-line bg-surface p-2 shadow-lg"
+          className="glass-strong z-[70] max-h-80 overflow-auto rounded border border-line p-2 shadow-lg"
         >
           <div className="mb-1 flex items-center justify-between">
             <strong className="text-sm">Notifications</strong>

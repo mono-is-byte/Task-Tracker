@@ -64,18 +64,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       const epicName = str(r["Epic"]);
       const epic = epicName ? findByName(epics, epicName) : undefined;
       if (epicName && !epic) throw new Error(`Unknown Epic "${epicName}". Create it first.`);
-      const storyTitle = str(r["User Story"]);
-      let storyId: string | null = null;
-      if (storyTitle) {
-        const found = await db.story.findFirst({ where: { projectId: id, title: storyTitle } });
-        if (found) storyId = found.id;
-        else {
-          const created2 = await db.story.create({
-            data: { projectId: id, title: storyTitle, epicId: epic?.id ?? null },
-          });
-          storyId = created2.id;
-        }
-      }
+      // PHASE 11.1: old "Story"/"User Story"/"Parent story" columns are ignored.
       const statusName = str(r["Status"]) || "To Do";
       const status = findByName(statuses, statusName);
       if (!status) throw new Error(`Unknown Status "${statusName}".`);
@@ -96,7 +85,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       const task = await createTask(db, ctx, {
         title,
         description: str(r["Description"]) || undefined,
-        storyPoints: num(r["Story Points"]),
         estHours: num(r["Est. Hours"]),
         priorityId: priority.id,
         statusId: status.id,
@@ -106,7 +94,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         endDate: str(r["End Date"]) || null,
         gitBranch: str(r["Git Branch"]) || null,
         epicId: epic?.id ?? null,
-        storyId,
       });
       created.push(task.id);
       const fresh = await db.task.findUniqueOrThrow({ where: { id: task.id } });

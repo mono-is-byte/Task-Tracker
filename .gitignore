@@ -21,11 +21,14 @@ next-env.d.ts
 .env*
 !.env.example
 
+# Local safety snapshots (Phase 0 pre-refactor backup)
+backup/
+
 # Test coverage
 coverage/
 
 # User-uploaded files
 public/uploads/
 
+# Vercel CLI project link (created per machine by `vercel link`)
 .vercel
-.env*

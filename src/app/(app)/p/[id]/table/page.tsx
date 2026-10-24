@@ -8,6 +8,7 @@ import { useTicker } from "@/hooks/useTicker";
 import { useTasks, patchTask, createTask, timerAction, refreshTasks, type TaskRow } from "@/lib/taskStore";
 import { fmtDateTime, fmtDur, timerChipClass, timerSummary } from "@/lib/timerFormat";
 import { memberLabel, userOptionLabel } from "@/lib/memberLabel";
+import { buildTaskNotes, filterVisibleNotes, notesAsLines } from "@/lib/notes";
 import Avatar from "@/components/Avatar";
 import TaskDrawer from "@/components/TaskDrawer";
 import TaskMenu from "@/components/TaskMenu";
@@ -35,10 +36,14 @@ type Task = TaskRow & {
   statusId: string; status: { name: string; color: string; category: string; timerRole: string };
   priorityId: string; priority: { name: string; color: string };
   assigneeId: string | null; assignee: { id: string; name: string; avatarUrl: string | null } | null;
+  /** PHASE 4: system "assigned by" snapshot (read-only). */
+  assignedById: string | null; assignedAt: string | null;
+  assignedBy: { id: string; name: string; deletedAt: string | null } | null;
   testedById: string | null; testedBy: { id: string; name: string } | null;
   epicId: string | null; epic: { id: string; name: string } | null;
-  storyId: string | null; story: { id: string; title: string } | null;
   typeId: string | null; type: { id: string; name: string } | null;
+  /** PHASE 11.3: unified notes (comments + remarks + feedback). */
+  comments?: { id: string; kind: string; body: string; createdAt: string; author: { name: string; deletedAt?: string | null } | null }[];
   labels: string[]; customValues: Record<string, unknown>;
   startDate: string | null; endDate: string | null; dueAt: string | null;
   startedAt: string | null; stoppedAt: string | null; stageEnteredAt: string | null; totalSeconds: number | null;
@@ -51,18 +56,23 @@ type Task = TaskRow & {
 // loggedHours) are untouched — the drawer, board, reports and API keep using
 // them, and nothing in the database was rewritten.
 const BASE_COLS = [
-  "key", "title", "status", "assignee", "priority", "type", "testedBy",
+  // Description sits immediately beside the task title so the Board/dialog
+  // description is readable in the main table without hunting for it.
+  "key", "title", "description", "status",
+  // PHASE 11.5: exact order Assigned by → Assignee → Tested by.
+  "assignedBy", "assignee", "testedBy",
+  "priority", "type",
   "startDate", "endDate", "estHours", "estDays", "rdTime",
-  "epic", "story", "description",
+  "epic", "notes",
   "timerStart", "timerDue", "timerState", "timerActual",
   "createdAt", "updatedAt",
 ] as const;
 type BaseCol = (typeof BASE_COLS)[number];
 type Col = BaseCol | `cf:${string}`;
 /** Hidden by default (still available via "Hide column…"/show list). */
-const DEFAULT_HIDDEN: Col[] = ["description", "rdTime", "createdAt", "updatedAt"];
+const DEFAULT_HIDDEN: Col[] = ["rdTime", "createdAt", "updatedAt"];
 
-const RO_COLS = new Set<Col>(["key", "estDays", "timerStart", "timerActual", "createdAt", "updatedAt"]);
+const RO_COLS = new Set<Col>(["key", "estDays", "timerStart", "timerActual", "createdAt", "updatedAt", "assignedBy"]);
 
 /** Numeric/duration columns read better right-aligned (table redesign). */
 const RIGHT_COLS = new Set<Col>([
@@ -213,6 +223,75 @@ function TextCell({ value, onCommit, col, multiline }: { value: string; onCommit
   );
 }
 
+/**
+ * PHASE 11.2: the Table's Description cell. Plain text, first lines truncated
+ * with the full value in a tooltip; click to edit when the role may edit it.
+ * (No HTML is ever rendered.)
+ */
+function LongTextCell({
+  value, onCommit, editable,
+}: {
+  value: string; onCommit: (v: unknown) => Promise<unknown>; editable: boolean;
+}) {
+  const { status, run } = useCellCommit(onCommit);
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(value);
+  useEffect(() => { setText(value); }, [value]);
+  if (!editing || !editable) {
+    return (
+      <span
+        className={`block max-w-56 truncate ${editable ? "cursor-text" : ""}`}
+        title={value || "—"}
+        onClick={() => { if (editable) setEditing(true); }}
+      >
+        {value || "—"}
+        <CellStatus status={status} />
+      </span>
+    );
+  }
+  const finish = (save: boolean) => {
+    setEditing(false);
+    if (save && text !== value) void run(text);
+    else setText(value);
+  };
+  return (
+    <span className="flex items-start">
+      <textarea
+        autoFocus
+        value={text}
+        rows={2}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => finish(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") { e.preventDefault(); finish(false); }
+          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); (e.target as HTMLElement).blur(); }
+        }}
+        className={`${cellInput} min-w-56 resize-none`}
+        aria-label="Description"
+      />
+      <CellStatus status={status} />
+    </span>
+  );
+}
+
+function NotesCell({ t }: { t: Task }) {
+  const notes = buildTaskNotes(t.comments);
+  const shown = notes.slice(-3);
+  const more = notes.length - shown.length;
+  const tip = notes.map((n) => `${n.n}. ${n.text}`).join("\n");
+  if (notes.length === 0) return <span className="text-slate-400">—</span>;
+  return (
+    <span className="block max-w-60 cursor-pointer" title={tip}>
+      {shown.map((n) => (
+        <span key={n.id} className="block truncate text-xs">
+          <span className="font-medium text-slate-500">{n.n}.</span> {n.text}
+        </span>
+      ))}
+      {more > 0 && <span className="text-xs text-slate-400">+{more} more</span>}
+    </span>
+  );
+}
+
 function NumberCell({ value, onCommit, col, step }: { value: number | null; onCommit: (v: unknown) => Promise<unknown>; col: Col; step?: string }) {
   const { status, run } = useCellCommit(onCommit);
   const [text, setText] = useState(value == null ? "" : String(value));
@@ -355,10 +434,10 @@ export default function TablePage() {
   const { tasks, loading, error } = useTasks(projectId);
   const rows = tasks as Task[];
   const [drawerId, setDrawerId] = useState<string | null>(searchParams.get("task"));
-  const [stories, setStories] = useState<{ id: string; title: string }[]>([]);
 
   const [fSearch, setFSearch] = useState("");
   const [fAssignee, setFAssignee] = useState("");
+  const [fAssignedBy, setFAssignedBy] = useState("");
   const [fStatus, setFStatus] = useState("");
   const [fEpic, setFEpic] = useState("");
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: "serial", dir: 1 });
@@ -396,11 +475,6 @@ export default function TablePage() {
   }, [layoutFor, projectId, hidden, widths]);
 
   useEffect(() => {
-    api<{ stories: { id: string; title: string }[] }>(`/api/projects/${projectId}/stories`)
-      .then((d) => setStories(d.stories)).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
-  useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const el = e.target as HTMLElement;
       if (e.key === "/" && !["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) {
@@ -423,6 +497,9 @@ export default function TablePage() {
     const arr = rows.filter((t) => {
       if (fSearch && !(`${t.key} ${t.title}`.toLowerCase().includes(fSearch.toLowerCase()))) return false;
       if (fAssignee && (t.assigneeId ?? "") !== fAssignee) return false;
+      // PHASE 4: "none" = tasks with no recorded assigner.
+      if (fAssignedBy === "none" && t.assignedById) return false;
+      if (fAssignedBy && fAssignedBy !== "none" && (t.assignedById ?? "") !== fAssignedBy) return false;
       if (fStatus && t.statusId !== fStatus) return false;
       if (fEpic && (t.epicId ?? "") !== fEpic) return false;
       return true;
@@ -438,10 +515,11 @@ export default function TablePage() {
         case "status": return (lookups?.statuses ?? []).findIndex((s) => s.id === t.statusId);
         case "priority": return (lookups?.priorities ?? []).findIndex((p) => p.id === t.priorityId);
         case "assignee": return t.assignee?.name ?? "";
+        case "assignedBy": return t.assignedBy?.name ?? "";
         case "testedBy": return t.testedBy?.name ?? "";
         case "type": return t.type?.name ?? "";
         case "epic": return t.epic?.name ?? "";
-        case "story": return t.story?.title ?? "";
+        case "notes": return buildTaskNotes(t.comments).map((n) => n.text).join(" ").toLowerCase();
         case "startDate": return t.startDate ?? "";
         case "endDate": return t.endDate ?? "";
         case "timerDue": return t.dueAt ?? "";
@@ -461,14 +539,14 @@ export default function TablePage() {
       return (va < vb ? -1 : va > vb ? 1 : 0) * sort.dir;
     });
     return arr;
-  }, [rows, sort, fSearch, fAssignee, fStatus, fEpic, lookups]);
+  }, [rows, sort, fSearch, fAssignee, fAssignedBy, fStatus, fEpic, lookups]);
 
   const grouped = useMemo(() => {
     if (!groupBy) return [{ name: "", items: sorted }];
     const map = new Map<string, Task[]>();
     for (const t of sorted) {
       const name =
-        groupBy === "epic" ? (t.epic?.name ?? "(no project name)") :
+        groupBy === "epic" ? (t.epic?.name ?? "(no epic)") :
         groupBy === "assignee" ? (t.assignee?.name ?? "(unassigned)") :
         groupBy === "status" ? t.status.name : "";
       const arr = map.get(name) ?? [];
@@ -510,7 +588,10 @@ export default function TablePage() {
 
   function colField(c: Col): string {
     if (c.startsWith("cf:")) return "custom";
-    return c === "key" || c === "timerStart" || c === "timerActual" || c === "createdAt" || c === "updatedAt"
+    // PHASE 4: the "assigned by" snapshot follows the assignee field's rule, so
+    // a role that may not read the assignee never sees who assigned them.
+    if (c === "assignedBy") return "assignee";
+    return c === "key" || c === "notes" || c === "timerStart" || c === "timerActual" || c === "createdAt" || c === "updatedAt"
       ? "title" : c === "timerDue" ? "dueAt" : c === "timerState" ? "title" : c;
   }
 
@@ -609,11 +690,17 @@ export default function TablePage() {
 
   /** Memoized row: only the edited row re-renders (item 7 perf). */
   const TableRow = memo(function TableRow({ t }: { t: Task }) {
+    const isSelected = selected.has(t.id);
     return (
-      <tr className={`tt-row border-b border-line ${t.status.category === "done" ? "task-row-done" : ""}`}
-        style={{ background: `${t.status.color}14` }}>
-        <td className="w-8 px-2 py-1"><input type="checkbox" checked={selected.has(t.id)}
-          onChange={(e) => setSelected((s) => { const n = new Set(s); if (e.target.checked) n.add(t.id); else n.delete(t.id); return n; })} /></td>
+      <tr
+        className={`tt-row border-b border-line ${isSelected ? "row-selected" : ""} ${t.status.category === "done" ? "task-row-done" : ""}`}
+        aria-selected={isSelected}
+        style={{ background: isSelected ? "var(--row-selected-bg)" : `${t.status.color}14` }}>
+        <td className="w-8 px-2 py-1"><input type="checkbox" checked={isSelected}
+          aria-label={`Select ${t.key}`}
+          onChange={(e) => setSelected((s) => { const n = new Set(s); if (e.target.checked) n.add(t.id); else n.delete(t.id); return n; })}
+          onKeyDown={(e) => { if (e.key === " ") { e.preventDefault(); setSelected((s) => { const n = new Set(s); if (s.has(t.id)) n.delete(t.id); else n.add(t.id); return n; }); } }}
+        /></td>
         {visible.map((c) => (
           <td key={c} data-col={c} data-num={RIGHT_COLS.has(c) ? "1" : undefined} className="whitespace-nowrap px-2 py-1 align-middle"
             style={widths[c] ? { width: widths[c], minWidth: widths[c] } : undefined}>
@@ -653,6 +740,19 @@ export default function TablePage() {
           return <span className="text-slate-500" title="Total tracked time — read-only">{t.timerState === "not_started" ? "—" : fmtDur(t.timerWorkedMs)}<LockMark /></span>;
         case "createdAt": return <span className="text-slate-500" title="Created — read-only">{new Date(t.createdAt).toLocaleDateString()}<LockMark /></span>;
         case "updatedAt": return <span className="text-slate-500" title="Last updated — read-only">{new Date(t.updatedAt).toLocaleDateString()}<LockMark /></span>;
+        case "assignedBy":
+          // PHASE 4: server-owned snapshot ("assigned by whom", newest change).
+          // Soft-deleted assigners stay visible and are marked "(removed)";
+          // a task whose assignment predates the feature shows "—".
+          return (
+            <span className="text-slate-500" title={t.assignedAt
+              ? `Assigned ${new Date(t.assignedAt).toLocaleString()} — read-only`
+              : "No recorded assignment — read-only"}>
+              {t.assignedBy ? `${t.assignedBy.name}${t.assignedBy.deletedAt ? " (removed)" : ""}` : "—"}
+              {t.assignedAt ? <span className="ml-1 text-slate-400">{new Date(t.assignedAt).toLocaleDateString()}</span> : null}
+              <LockMark />
+            </span>
+          );
       }
     }
     switch (c) {
@@ -693,11 +793,12 @@ export default function TablePage() {
         return rule("epic") === "editable"
           ? <SelectCell col={c} value={t.epicId} options={lk.epics} onCommit={(v) => commit(t, { epicId: v })} />
           : (t.epic?.name ?? "—");
-      case "story":
-        return rule("story") === "editable" || canManageRow(t)
-          ? <SelectCell col={c} value={t.storyId} options={stories.map((s) => ({ id: s.id, name: s.title }))}
-              onCommit={(v) => commit(t, { storyId: v })} />
-          : (t.story?.title ?? "—");
+      case "description":
+        return rule("description") === "editable"
+          ? <LongTextCell value={t.description ?? ""} editable={rule("description") === "editable"} onCommit={(v) => commit(t, { description: v })} />
+          : (<span className="block max-w-56 truncate" title={t.description ?? "—"}>{t.description || "—"}</span>);
+      case "notes":
+        return <NotesCell t={t} />;
       case "estHours":
         return rule("estHours") === "editable"
           ? <NumberCell value={t.estHours} col={c} onCommit={(v) => commit(t, { estHours: v })} />
@@ -761,10 +862,12 @@ export default function TablePage() {
   }
 
   const headers: Record<BaseCol, string> = {
-    key: "SL / Key", title: "Task title", status: "Status", assignee: "Assignee", priority: "Priority",
-    type: "Issue type", testedBy: "Tested By", startDate: "Start", endDate: "End",
+    key: "SL / Key", title: "Task title", status: "Status",
+    assignedBy: "Assigned by", assignee: "Assignee", testedBy: "Tested By",
+    priority: "Priority",
+    type: "Issue type", startDate: "Start", endDate: "End",
     estHours: "Est. Hrs", estDays: "Est. Days", rdTime: "R&D Hrs",
-    epic: "Project Name", story: "Parent story", description: "Description",
+    epic: "Epic", description: "Description", notes: "Comments & notes",
     timerStart: "Start time", timerDue: "Due time", timerState: "Timer", timerActual: "Total time",
     createdAt: "Created", updatedAt: "Updated",
   };
@@ -779,6 +882,7 @@ export default function TablePage() {
     const q = new URLSearchParams();
     if (fSearch.trim()) q.set("q", fSearch.trim());
     if (fAssignee) q.set("assignee", fAssignee);
+    if (fAssignedBy) q.set("assignedBy", fAssignedBy);
     if (fStatus) q.set("status", fStatus);
     if (fEpic) q.set("epic", fEpic);
     const s = q.toString();
@@ -794,17 +898,23 @@ export default function TablePage() {
           <option value="">All assignees</option>
           {lookups.members.map((x) => <option key={x.userId} value={x.userId}>{userOptionLabel(x)}</option>)}
         </select>
+        <select value={fAssignedBy} onChange={(e) => setFAssignedBy(e.target.value)} className={`${fieldCls} max-w-56`}
+          title="Show only tasks assigned by a given person">
+          <option value="">All assigned by</option>
+          <option value="none">— (no recorded assigner)</option>
+          {lookups.members.map((x) => <option key={x.userId} value={x.userId}>{userOptionLabel(x)}</option>)}
+        </select>
         <select value={fStatus} onChange={(e) => setFStatus(e.target.value)} className={fieldCls}>
           <option value="">All statuses</option>
           {lookups.statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
         <select value={fEpic} onChange={(e) => setFEpic(e.target.value)} className={fieldCls}>
-          <option value="">All project names</option>
+          <option value="">All epics</option>
           {lookups.epics.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
         <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className={fieldCls}>
           <option value="">No grouping</option>
-          <option value="epic">Group: Project Name</option>
+          <option value="epic">Group: Epic</option>
           <option value="assignee">Group: Assignee</option>
           <option value="status">Group: Status</option>
         </select>
@@ -905,7 +1015,7 @@ export default function TablePage() {
             if (!viewName.trim()) return;
             await api(`/api/projects/${projectId}/views`, {
               method: "POST",
-              body: JSON.stringify({ name: viewName, scope: "table", config: { fSearch, fAssignee, fStatus, fEpic } }),
+              body: JSON.stringify({ name: viewName, scope: "table", config: { fSearch, fAssignee, fAssignedBy, fStatus, fEpic } }),
             });
             setViewName("");
             api<{ views: { id: string; name: string; config: Record<string, string> }[] }>(`/api/projects/${projectId}/views?scope=table`).then((d) => setViews(d.views));
@@ -915,7 +1025,8 @@ export default function TablePage() {
           <button key={v.id}
             onClick={() => {
               setFSearch(v.config.fSearch ?? "");
-              setFAssignee(v.config.fAssignee ?? ""); setFStatus(v.config.fStatus ?? ""); setFEpic(v.config.fEpic ?? "");
+              setFAssignee(v.config.fAssignee ?? ""); setFAssignedBy(v.config.fAssignedBy ?? "");
+              setFStatus(v.config.fStatus ?? ""); setFEpic(v.config.fEpic ?? "");
             }}
             className="tt-btn" title={`Apply saved view “${v.name}”`}>{v.name}</button>
         ))}
@@ -928,6 +1039,7 @@ export default function TablePage() {
               <tr>
                 <th className="sticky top-0 z-10 w-8 border-b border-line bg-surface px-2 py-1.5">
                   <input type="checkbox"
+                    ref={(el) => { if (el) el.indeterminate = sorted.length > 0 && sorted.some((t) => selected.has(t.id)) && !sorted.every((t) => selected.has(t.id)); }}
                     checked={sorted.length > 0 && sorted.every((t) => selected.has(t.id))}
                     onChange={(e) => setSelected(e.target.checked ? new Set(sorted.map((t) => t.id)) : new Set())} />
                 </th>

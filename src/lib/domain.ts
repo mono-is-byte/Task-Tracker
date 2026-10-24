@@ -1,9 +1,3 @@
-export const FIBONACCI = [1, 2, 3, 5, 8, 13, 21];
-
-export function isFibonacci(n: number): boolean {
-  return FIBONACCI.includes(n);
-}
-
 /** Est. Days is always calculated, never typed: hours / hoursPerDay, 2dp. */
 export function estDays(estHours: number | null | undefined, hoursPerDay: number): number | null {
   if (estHours == null || !Number.isFinite(estHours) || hoursPerDay <= 0) return null;
@@ -24,12 +18,11 @@ export function matchesSearch(haystack: string, query: string): boolean {
 export function taskSearchText(t: {
   title: string;
   description?: string | null;
-  storyTitle?: string | null;
   epicName?: string | null;
   gitBranch?: string | null;
   key?: string;
 }): string {
-  return [t.key ?? "", t.title, t.description ?? "", t.storyTitle ?? "", t.epicName ?? "", t.gitBranch ?? ""].join("\n");
+  return [t.key ?? "", t.title, t.description ?? "", t.epicName ?? "", t.gitBranch ?? ""].join("\n");
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -95,21 +88,18 @@ export function computeCapacity(
 
 export interface CapacityReport {
   plannedHours: number;
-  plannedPoints: number;
   capacityHours: number;
   over: boolean;
   overflow: number;
 }
 
 export function capacityReport(
-  tasks: { estHours?: number | null; storyPoints?: number | null }[],
+  tasks: { estHours?: number | null }[],
   capacityHours: number,
 ): CapacityReport {
   const plannedHours = Math.round(tasks.reduce((a, t) => a + (t.estHours ?? 0), 0) * 100) / 100;
-  const plannedPoints = tasks.reduce((a, t) => a + (t.storyPoints ?? 0), 0);
   return {
     plannedHours,
-    plannedPoints,
     capacityHours,
     over: plannedHours > capacityHours,
     overflow: Math.round((plannedHours - capacityHours) * 100) / 100,
@@ -120,22 +110,23 @@ export function capacityReport(
 export const TASK_CSV_COLUMNS = [
   "SL",
   "Epic",
-  "User Story",
   "Task title",
-  "Story Points",
   "Est. Hours",
   "Est. Days",
   "Description",
+  // PHASE 11.3: one numbered notes cell replaces the split Remarks/Feedback
+  // columns. Import still accepts those legacy headers.
+  "Comments & notes",
   "Priority",
   "Status",
+  // PHASE 11.5: these three stay adjacent, in this exact order.
+  "Assigned By",
   "Assignee",
+  "Tested By",
   "Start Date",
   "End Date",
-  "Remarks",
   "Git Branch",
-  "Tested By",
   "Dependency",
-  "Feedback",
 ] as const;
 
 export type CsvRow = Record<string, string>;

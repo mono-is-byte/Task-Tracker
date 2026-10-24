@@ -32,7 +32,7 @@ describe("buildReportPdf", () => {
   const base = {
     project: { key: "PRJ", name: "Test Project" },
     generatedAt: new Date("2026-10-15T10:00:00Z"),
-    summary: { total: 3, open: 2, done: 1, overdue: 0, points: 8, est: 12, logged: 9, rd: 1.5 },
+    summary: { total: 3, open: 2, done: 1, overdue: 0, est: 12, logged: 9, rd: 1.5 },
     statusDist: [{ name: "To Do", count: 2, color: "#888888" }, { name: "Done", count: 1, color: "#22c55e" }],
     perAssignee: [{ name: "Alice", n: 2, pts: 5, hrs: 8 }],
     perTester: [{ name: "Bob", n: 1 }],
@@ -52,7 +52,7 @@ describe("buildReportPdf", () => {
   it("handles empty sections without crashing", async () => {
     const doc = await buildReportPdf({
       ...base,
-      summary: { total: 0, open: 0, done: 0, overdue: 0, points: 0, est: 0, logged: 0, rd: 0 },
+      summary: { total: 0, open: 0, done: 0, overdue: 0, est: 0, logged: 0, rd: 0 },
       statusDist: [], perAssignee: [], perTester: [], overdue: [],
     });
     expect(doc.getNumberOfPages()).toBe(1);

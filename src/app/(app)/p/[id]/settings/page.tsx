@@ -25,18 +25,14 @@ export default function SettingsPage() {
     transitions: { id: string; fromId: string; toId: string; roleIds: string; from: { name: string }; to: { name: string } }[];
     roles: { id: string; name: string }[];
     issueTypes: { id: string; name: string }[];
-    /** Step 1: distinct designations users already have (autocomplete hints). */
-    designationHints: string[];
-    /** Step 1: free-text designations suggested per status. */
-    designationTags: Record<string, string[]>;
+    /** Phase 1: role ids suggested per status (never free text). */
+    designationRoleIds: Record<string, string[]>;
   } | null>(null);
   const [newStatus, setNewStatus] = useState({ name: "", category: "todo", color: "#64748b" });
   const [newTrans, setNewTrans] = useState({ fromId: "", toId: "", roleIds: [] as string[] });
   /** Transition row being re-roled inline (null = no row in edit mode). */
   const [transEdit, setTransEdit] = useState<{ id: string; roleIds: string[] } | null>(null);
   const [transBusy, setTransBusy] = useState(false);
-  /** Step 1: free-text chip drafts, per status. */
-  const [tagDraft, setTagDraft] = useState<Record<string, string>>({});
 
   const [rules, setRules] = useState<{ id: string; name: string; trigger: string; enabled: boolean; condition: unknown; action: unknown }[]>([]);
   // Simplified rule builder: a status-change trigger, an optional status condition, and an assign/notify action.
@@ -133,14 +129,14 @@ export default function SettingsPage() {
     } catch (e) { setMsg(e instanceof Error ? e.message : "Reorder failed."); }
   }
 
-  /** Step 1: persist a status's free-text designation suggestion chips. */
-  async function saveDesignationTags(statusId: string, next: string[]) {
+  /** Phase 1: persist a status's suggested-role ids (Settings > Statuses). */
+  async function saveDesignationRoles(statusId: string, next: string[]) {
     try {
       await api(`/api/projects/${projectId}/workflow`, {
         method: "PATCH",
-        body: JSON.stringify({ kind: "status", refId: statusId, designationTags: next }),
+        body: JSON.stringify({ kind: "status", refId: statusId, designationRoleIds: next }),
       });
-      setWf((w) => (w ? { ...w, designationTags: { ...w.designationTags, [statusId]: next } } : w));
+      setWf((w) => (w ? { ...w, designationRoleIds: { ...w.designationRoleIds, [statusId]: next } } : w));
     } catch (e) { setMsg(e instanceof Error ? e.message : "Could not save the suggestion list."); }
   }
 
@@ -153,17 +149,6 @@ export default function SettingsPage() {
       });
       loadAll();
     } catch (e) { setMsg(e instanceof Error ? e.message : "Could not change the timer role."); }
-  }
-
-  /** Add the typed chip (Enter / comma / +): any text is allowed. */
-  function addDesignationTag(statusId: string) {
-    const raw = tagDraft[statusId] ?? "";
-    const text = raw.trim().replace(/\s+/g, " ");
-    setTagDraft((d) => ({ ...d, [statusId]: "" }));
-    if (!text) return;
-    const cur = wf?.designationTags?.[statusId] ?? [];
-    if (cur.some((x) => x.toLowerCase() === text.toLowerCase())) return;
-    void saveDesignationTags(statusId, [...cur, text]);
   }
 
   /** Delete a status column (confirmed via ConfirmDialog); if it still has tasks the move-tasks dialog opens. */
@@ -510,7 +495,7 @@ export default function SettingsPage() {
 
         <section className={`${box} lg:order-1`}>
           <h3 className="mb-1 text-sm font-bold">Transitions (from → to, per role)</h3>
-          <p className="mb-2 text-[11px] text-slate-500">Empty roles = every project role may use it. Admin/PM may always move to any status.</p>
+          <p className="mb-2 text-[11px] text-slate-500">Only transitions listed here are allowed. Empty roles = every project role may use it. Project Manager and Super Admin may move to any status.</p>
           <table className="w-full border-collapse text-xs">
             <thead>
               <tr className="text-left text-[10px] uppercase tracking-wide text-slate-500">
@@ -631,7 +616,7 @@ export default function SettingsPage() {
         <h3 className="mb-1 text-sm font-bold">Statuses</h3>
         <p className="mb-2 text-[11px] text-slate-500">
           {canWf
-            ? "Statuses are ordered — members may only move a task forward; Admin/PM may move to any status. The timer role decides which columns offer Start/Stop (Track), show only the total (Final — Done), or no timer at all (None)."
+            ? "The only allowed status moves are the Transitions defined in this project — there is no automatic “forward” rule. Project Manager and Super Admin may move to any status. The timer role decides which columns offer Start/Stop (Track), show only the total (Final — Done), or no timer at all (None)."
             : "Read-only — only Admin/PM can edit the workflow."}
         </p>
         <ul className="mb-2 text-xs">
@@ -676,38 +661,39 @@ export default function SettingsPage() {
               </span>
               <span className="flex flex-wrap items-center gap-1 text-[10px]">
                 <span className="text-slate-500">Suggest designations:</span>
-                {(wf?.designationTags?.[s.id] ?? []).map((text) => (
-                  <span key={text} className="inline-flex items-center gap-1 rounded-full border border-indigo-500 bg-indigo-50 px-2 py-0.5 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-200">
-                    {text}
-                    {canWf && (
-                      <button
-                        onClick={() => void saveDesignationTags(s.id, (wf?.designationTags?.[s.id] ?? []).filter((x) => x !== text))}
-                        className="text-indigo-500 hover:text-indigo-700 dark:text-indigo-300"
-                        title={`Remove “${text}”`}
-                      >×</button>
-                    )}
-                  </span>
-                ))}
+                {(wf?.designationRoleIds?.[s.id] ?? []).map((roleId) => {
+                  const name = (wf?.roles ?? []).find((r) => r.id === roleId)?.name ?? "—";
+                  return (
+                    <span key={roleId} className="inline-flex items-center gap-1 rounded-full border border-indigo-500 bg-indigo-50 px-2 py-0.5 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-200">
+                      {name}
+                      {canWf && (
+                        <button
+                          onClick={() => void saveDesignationRoles(s.id, (wf?.designationRoleIds?.[s.id] ?? []).filter((x) => x !== roleId))}
+                          className="text-indigo-500 hover:text-indigo-700 dark:text-indigo-300"
+                          title={`Remove “${name}”`}
+                        >×</button>
+                      )}
+                    </span>
+                  );
+                })}
                 {canWf && (
-                  <>
-                    <input
-                      list={`des-hints-${s.id}`}
-                      value={tagDraft[s.id] ?? ""}
-                      onChange={(e) => setTagDraft((d) => ({ ...d, [s.id]: e.target.value }))}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addDesignationTag(s.id); }
-                      }}
-                      onBlur={() => { if ((tagDraft[s.id] ?? "").trim()) addDesignationTag(s.id); }}
-                      placeholder="type a title + Enter"
-                      className={`${inp} w-40 py-0.5`}
-                    />
-                    <datalist id={`des-hints-${s.id}`}>
-                      {(wf?.designationHints ?? []).map((h) => <option key={h} value={h} />)}
-                    </datalist>
-                    <button onClick={() => addDesignationTag(s.id)} className="rounded border px-1 dark:border-slate-700" title="Add">+</button>
-                  </>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (!v) return;
+                      void saveDesignationRoles(s.id, [...(wf?.designationRoleIds?.[s.id] ?? []), v]);
+                    }}
+                    className={`${inp} py-0.5`}
+                    title="Add a role to this status's suggested list"
+                  >
+                    <option value="">+ role…</option>
+                    {(wf?.roles ?? [])
+                      .filter((r) => !(wf?.designationRoleIds?.[s.id] ?? []).includes(r.id))
+                      .map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
                 )}
-                {(wf?.designationTags?.[s.id] ?? []).length === 0 && !canWf && (
+                {(wf?.designationRoleIds?.[s.id] ?? []).length === 0 && !canWf && (
                   <span className="text-slate-400">none</span>
                 )}
               </span>
@@ -1003,7 +989,7 @@ export default function SettingsPage() {
 
       {pendingLookup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-96 rounded border border-line bg-surface p-4 shadow-lg">
+          <div className="glass-strong w-96 rounded border border-line p-4 shadow-lg">
             <h4 className="mb-1 text-sm font-bold">
               Move tasks off “{pendingLookup.name}”
             </h4>
@@ -1037,7 +1023,7 @@ export default function SettingsPage() {
 
       {pendingDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-96 rounded border border-line bg-surface p-4 shadow-lg">
+          <div className="glass-strong w-96 rounded border border-line p-4 shadow-lg">
             <h4 className="mb-1 text-sm font-bold">Remove column “{pendingDelete.name}”?</h4>
             <p className="mb-2 text-xs text-slate-500">{pendingDelete.message}</p>
             <label className="mb-3 block text-xs">

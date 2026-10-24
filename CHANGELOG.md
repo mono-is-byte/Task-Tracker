@@ -11,6 +11,26 @@ Release sections will be added here as versions are tagged.
 
 ### Added
 
+- **Role = Designation with one source of truth**: a user's designation is a Role id
+  kept in sync by a single helper (`src/lib/designation.ts`); every screen renders the
+  role's live name and shows "No role" when unset. A one-time repair pass
+  (`npm run repair:designations`) fixes stale rows.
+- **Real workflow enforcement**: a status move is allowed only when an explicit
+  transition row exists — transitions are the single source of truth. The forward-only
+  rule is gone and bypass is an explicit `bypass_transitions` permission flag (Project
+  Manager only by default, editable on the Roles page). Super Admins bypass.
+- **Per-status suggested designations** are picked from real roles (multi-select of role
+  ids) instead of free text.
+- **Field-level rules** (`hidden` / `readonly` / `editable`) are enforced server-side on
+  create, edit, bulk and import; hidden fields are stripped from every response.
+- **Profile: optional gender + editable username** — gender (Male / Female / Other /
+  Prefer not to say) shows in Profile and Users; the username change is
+  password-confirmed, audited, rate-limited and checked case-insensitively (soft-deleted
+  accounts included). Login still accepts an email **or** a username.
+- **Liquid Glass UI** across the whole app (light + dark) built from Tailwind v4 `@theme`
+  tokens plus reusable `.glass*` classes, with solid fallbacks for
+  `prefers-reduced-transparency` and browsers without `backdrop-filter`, and no motion
+  under `prefers-reduced-motion`.
 - **Board (Kanban)** with drag-and-drop status changes, per-column quick-add and
   over-limit `WIP!` badges.
 - **Table view** with inline editing, filters, sortable and resizable columns, row
@@ -70,6 +90,12 @@ Release sections will be added here as versions are tagged.
 
 ### Changed
 
+- **Workflow denials on the board** now revert the drag and raise a toast (the API
+  answers 403), and columns a task cannot legally move to are dimmed as a hint.
+- **Settings → Workflow** shows **live role names** in the suggestion and transition
+  pickers, and help text that matches the enforced rules.
+- **Comments "viewers may comment"** is keyed off permissions instead of the
+  `Viewer / Stakeholder` role name.
 - Board, Table, Timeline and Reports share **one task store per project** — optimistic
   updates with rollback and SSE refresh, so a change in one view appears in the others
   immediately.
@@ -104,8 +130,10 @@ Release sections will be added here as versions are tagged.
 
 ### Removed
 
-- **Sprints** from the UI and API (the underlying tables are kept — no data was
-  destroyed).
+- **Sprints** completely: the `Sprint` table plus `Story.sprintId` and `Task.sprintId`
+  (migration `20261024182738_drop_legacy_sprint_model`), the unused
+  `getAllowedTransitions()` helper, and the never-read `SESSION_SECRET` env var (removed
+  from `.env.example` and the docs). See `CLEANUP_REPORT.md`.
 - **WIP-limit editing** from Settings; stored limits still drive the board's over-limit
   badges.
 - Legacy `Designation` / `StatusDesignation` tables and the write-only `User.locale` /
