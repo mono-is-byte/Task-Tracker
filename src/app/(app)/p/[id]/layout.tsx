@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { loadProject, requireViewer } from "@/lib/server";
+import { memberRoleLabels } from "@/lib/memberLabel";
 import ProjectTabs from "@/components/ProjectTabs";
 
 const TABS = [
@@ -27,6 +28,13 @@ export default async function ProjectLayout({
   if (!loaded) redirect("/no-access");
   const { project, membership } = loaded;
   const accent = (project.settings.accent as string) || "#4f46e5";
+  // The badge beside the project name shows who you are HERE — the project role
+  // (super admins included) or your designation — instead of the generic
+  // synthetic "Super Admin"/"Team member" label. The directory row already
+  // carries both values, so no extra query is needed.
+  const viewer = loaded.members.find((m) => m.userId === user.id);
+  const viewerRole =
+    memberRoleLabels(viewer?.roleNames ?? [], viewer?.designationName).join(", ") || membership.roleName;
 
   return (
     <div>
@@ -36,7 +44,12 @@ export default async function ProjectLayout({
           <span className="mr-2 font-mono text-sm" style={{ color: accent }}>{project.key}</span>
           {project.name}
         </h1>
-        <span className="rounded bg-slate-200 px-2 py-0.5 text-xs dark:bg-slate-800">{membership.roleName}</span>
+        <span
+          className="rounded bg-slate-200 px-2 py-0.5 text-xs dark:bg-slate-800"
+          title="Your role in this project (falls back to your designation)"
+        >
+          {viewerRole}
+        </span>
         <div className="ml-2">
           <ProjectTabs
             projectId={id}

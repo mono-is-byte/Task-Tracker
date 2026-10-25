@@ -6,7 +6,7 @@ import Link from "next/link";
 import { api } from "@/lib/client";
 import Avatar from "@/components/Avatar";
 import ConfirmDialog from "@/components/ConfirmDialog";
-import { memberLabel, rolesWithoutDesignation } from "@/lib/memberLabel";
+import { memberLabel, memberRoleLabels } from "@/lib/memberLabel";
 import { IconPlus, IconTrash } from "@/components/icons";
 
 /**
@@ -129,9 +129,10 @@ export default function MembersPage() {
           {members.length} member{members.length === 1 ? "" : "s"}
         </span>
         <p className="w-full text-xs text-muted">
-          People with access to this project. Designations are managed on the{" "}
+          People with access to this project. A member&apos;s project role and their
+          designation from the{" "}
           <Link href="/users" className="text-indigo-600 underline dark:text-indigo-400">Users page</Link>{" "}
-          and appear here automatically; to assign multiple roles use that page too.
+          are shown together in one column — identical labels appear only once.
         </p>
       </div>
 
@@ -202,14 +203,13 @@ export default function MembersPage() {
               <thead className="bg-canvas text-left text-[11px] uppercase text-muted">
                 <tr>
                   <th className="px-3 py-2 font-semibold">Member</th>
-                  <th className="hidden px-3 py-2 font-semibold sm:table-cell">Designation</th>
-                  <th className="px-3 py-2 font-semibold">Roles in project</th>
+                  <th className="px-3 py-2 font-semibold">Role / Designation</th>
                   <th className="px-3 py-2 text-right font-semibold">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
                 {members.map((m) => {
-                  const roleNames = rolesWithoutDesignation(m.roleNames, m.designation);
+                  const roleLabels = memberRoleLabels(m.roleNames, m.designation);
                   return (
                     <tr key={m.id} className="align-top hover:bg-canvas/60">
                       <td className="px-3 py-2">
@@ -231,14 +231,6 @@ export default function MembersPage() {
                                   deactivated
                                 </span>
                               )}
-                              {m.designation && (
-                                <span
-                                  className="rounded border border-indigo-300 px-1 text-[10px] text-indigo-700 dark:border-indigo-700 dark:text-indigo-300 sm:hidden"
-                                  title="Designation (synced live from the Users page)"
-                                >
-                                  {m.designation}
-                                </span>
-                              )}
                             </span>
                             <span className="block truncate text-xs text-muted" title={m.email}>
                               @{m.username} · {m.email}
@@ -246,28 +238,18 @@ export default function MembersPage() {
                           </span>
                         </span>
                       </td>
-                      <td className="hidden px-3 py-2 sm:table-cell">
-                        {m.designation ? (
-                          <span
-                            className="inline-block rounded border border-indigo-300 px-1 text-xs text-indigo-700 dark:border-indigo-700 dark:text-indigo-300"
-                            title="Designation (synced live from the Users page)"
-                          >
-                            {m.designation}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-muted">—</span>
-                        )}
-                      </td>
                       <td className="px-3 py-2">
                         <span className="flex flex-wrap gap-1">
-                          {roleNames.map((rn) => (
-                            <span key={rn} className="rounded bg-line/60 px-1.5 py-0.5 text-xs">{rn}</span>
-                          ))}
-                          {roleNames.length === 0 && (
-                            <span className="text-xs text-muted" title={m.designation ? "Their only label is the designation shown here" : undefined}>
-                              —
+                          {roleLabels.map((rn) => (
+                            <span
+                              key={rn}
+                              className="rounded border border-indigo-300 px-1.5 py-0.5 text-xs text-indigo-700 dark:border-indigo-700 dark:text-indigo-300"
+                              title="Project role, or the designation from the Users page when the member has no project role"
+                            >
+                              {rn}
                             </span>
-                          )}
+                          ))}
+                          {roleLabels.length === 0 && <span className="text-xs text-muted">—</span>}
                         </span>
                       </td>
                       <td className="px-3 py-2 text-right">

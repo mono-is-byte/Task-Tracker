@@ -207,9 +207,6 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
   const epicInfo = t
     ? ((t.epic as { id: string; name: string; color?: string | null } | null) ?? null)
     : null;
-  // The shared store row (listTasks) carries no projectName; the lookups always
-  // do, and the project name is fixed text in the header (no dropdown).
-  const projectName = String(t?.projectName ?? lookups.project.name ?? "");
   const assignedBy = t
     ? ((t.assignedBy as { name: string; deletedAt: string | null } | null) ?? null)
     : null;
@@ -254,7 +251,8 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
         className="glass-strong flex h-full w-full max-w-lg flex-col shadow-2xl sm:rounded-l-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Fixed header: identifier + type + epic + title, project name beside Close (never scrolls away). */}
+        {/* Fixed header: identifier + type + epic + title (task title is enough —
+            the project name is not repeated inside the drawer). */}
         <div className="flex shrink-0 items-start gap-2 border-b border-line p-3">
           <div className="min-w-0 flex-1">
             {t ? (
@@ -309,14 +307,6 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
                 onChanged={() => { loadDetail(); onChanged(); }}
                 onDeleted={() => { onChanged(); onClose(); }}
               />
-            )}
-            {t && Boolean(projectName) && (
-              <span
-                className="mt-1.5 max-w-[9rem] truncate text-[11px] text-muted"
-                title={projectName}
-              >
-                {projectName}
-              </span>
             )}
             <button onClick={onClose} className="tt-btn shrink-0" title="Close (Esc)" aria-label="Close task panel">
               <IconX className="h-3.5 w-3.5" /> Close (Esc)

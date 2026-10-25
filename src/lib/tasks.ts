@@ -7,6 +7,7 @@ import { estDays, matchesSearch, taskSearchText } from "./domain";
 import { publish, publishGlobal } from "./events";
 import { filterVisibleNotes } from "./notes";
 import { canBypassTransitions, canDo, canEditTask, fieldRule, safeArr, type FieldRuleMap, type Membership } from "./permissions";
+import { summarizeStageTimes } from "./stageTime";
 import { stageTransitionData, timerInfo, type TimerFields } from "./timer";
 import { canTransition, type TransitionRule } from "./workflow";
 
@@ -55,8 +56,14 @@ export function serializeTask<T extends Record<string, unknown>>(prefix: string,
   const est = t.estHours as number | null | undefined;
   const statusRole = (t.status as { timerRole?: string } | undefined)?.timerRole;
   const timer = timerInfo({ ...(t as TimerFields), statusRole });
+  // Development / testing time comes from the Start→Stop stage history. The
+  // raw rows are dropped from the response — only the two closed totals travel.
+  const stage = summarizeStageTimes(
+    t.stageTimes as Parameters<typeof summarizeStageTimes>[0],
+  );
+  const { stageTimes: _stageTimes, ...base } = t;
   return {
-    ...t,
+    ...base,
     key: `${prefix}-${t.serial}`,
     estDays: estDays(est, hoursPerDay),
     labels: safeArr(t.labels as string),
@@ -66,6 +73,10 @@ export function serializeTask<T extends Record<string, unknown>>(prefix: string,
     timerWorkedMs: timer.workedMs,
     timerRemainingMs: timer.remainingMs,
     timerOverdueMs: timer.overdueMs,
+    /** "In Progress" time (ms) — closed segments; the client adds the running one. */
+    devTimeMs: stage.developmentMs,
+    /** "In Testing" time (ms) — closed segments; the client adds the running one. */
+    testTimeMs: stage.testingMs,
   };
 }
 
@@ -76,7 +87,7 @@ export function serializeTask<T extends Record<string, unknown>>(prefix: string,
  * server response, and a bare transaction row (no `status`/`priority`/`key`)
  * crashed the table's row renderer and left stale status names after edits.
  */
-const TASK_ROW_INCLUDE = {
+export const TASK_ROW_INCLUDE = {
   status: true, priority: true, type: true,
   assignee: { select: { id: true, name: true, username: true, avatarUrl: true } },
   // PHASE 4: current "assigned by" snapshot. `deletedAt` lets the UI mark a
@@ -84,6 +95,14 @@ const TASK_ROW_INCLUDE = {
   assignedBy: { select: { id: true, name: true, username: true, avatarUrl: true, deletedAt: true } },
   testedBy: { select: { id: true, name: true, username: true, avatarUrl: true } },
   epic: { select: { id: true, name: true, color: true } },
+  // Stage timer history → Development time (In Progress) and Testing time
+  // (In Testing). Serialized as two totals; the raw rows are never sent.
+  stageTimes: {
+    select: {
+      statusId: true, seconds: true, enteredAt: true, leftAt: true,
+      status: { select: { name: true } },
+    },
+  },
   // PHASE 11.3: notes travel with every task row (Board cards + Table column);
   // the drawer's detail response carries the same list. No per-task N+1.
   comments: {

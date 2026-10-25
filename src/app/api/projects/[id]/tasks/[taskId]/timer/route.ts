@@ -2,7 +2,7 @@ import { z } from "zod";
 import { fail, ok, readJson, requireMember } from "@/lib/api";
 import { db } from "@/lib/db";
 import { loadProject } from "@/lib/server";
-import { ctxFromLoad, serializeTask } from "@/lib/tasks";
+import { TASK_ROW_INCLUDE, ctxFromLoad, serializeTask, stripHiddenFields } from "@/lib/tasks";
 import { startTimer, stopTimer } from "@/lib/timer";
 
 /**

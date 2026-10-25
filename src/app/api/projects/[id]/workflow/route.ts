@@ -23,12 +23,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const [statuses, transitions, designationTags] = await Promise.all([
     db.status.findMany({ where: { projectId: id }, orderBy: { position: "asc" } }),
     db.statusTransition.findMany({ where: { projectId: id }, include: { from: true, to: true } }),
-    db.statusDesignationTag.findMany({ where: { status: { projectId: id } }, select: { statusId: true, text: true } }),
+    db.statusDesignationTag.findMany({ where: { status: { projectId: id } }, select: { statusId: true, roleId: true } }),
   ]);
   const roles = await db.role.findMany({ select: { id: true, name: true } });
   const types = await db.issueType.findMany({ where: { projectId: id }, select: { id: true, name: true } });
-  const tags: Record<string, string[]> = {};
-  for (const m of designationTags) (tags[m.statusId] ??= []).push(m.text);
   // Autocomplete hints for the tag editor: the role names users are actually
   // designated as (designations are role references — resolve the live names).
   const roleName = new Map(roles.map((r) => [r.id, r.name]));
@@ -40,7 +38,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     .map((h) => (h.designation ? roleName.get(h.designation) : null))
     .filter((v): v is string => Boolean(v))
     .sort((a, b) => a.localeCompare(b));
-  return ok({ statuses, transitions, roles, issueTypes: types, designationHints, designationTags: tags });
+  const roleIdsByStatus: Record<string, string[]> = {};
+  for (const m of designationTags) (roleIdsByStatus[m.statusId] ??= []).push(m.roleId);
+  return ok({
+    statuses,
+    transitions,
+    roles,
+    issueTypes: types,
+    designationHints,
+    // Role ids suggested per status (Settings > Statuses chips). Role names are
+    // resolved from `roles`, so renaming a role never leaves stale text behind.
+    designationRoleIds: roleIdsByStatus,
+  });
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -58,6 +67,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       roleIds: z.array(z.string()).optional(), issueTypeIds: z.array(z.string()).optional(),
     }).safeParse(value);
     if (!T.success) return fail(400, "validation", "fromId and toId are required.");
+    if (T.data.fromId === T.data.toId) {
+      return fail(400, "validation", "A transition must go from one status to a different status.");
+    }
+    // Both ends must belong to this project (a stale id would otherwise create
+    // a transition that can never fire).
+    const owned = await db.status.count({
+      where: { projectId: id, id: { in: [T.data.fromId, T.data.toId] } },
+    });
+    if (owned !== 2) return fail(400, "validation", "Pick two statuses from this project.");
+    const duplicate = await db.statusTransition.findFirst({
+      where: { projectId: id, fromId: T.data.fromId, toId: T.data.toId },
+      select: { id: true },
+    });
+    if (duplicate) return fail(409, "conflict", "That transition already exists.");
     try {
       const tr = await db.statusTransition.create({
         data: {
@@ -68,13 +91,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       });
       publish(id, "workflow_changed", {});
       return ok({ transition: tr }, 201);
-    } catch {
-      return fail(409, "conflict", "Transition already exists.");
+    } catch (e) {
+      // Surface the real cause — a generic "already exists" hid schema errors.
+      return fail(400, "validation", e instanceof Error ? e.message : "Could not create the transition.");
     }
   }
 
   const parsed = Body.safeParse(value);
   if (!parsed.success) return fail(400, "validation", "Status name and category are required.");
+  const name = parsed.data.name.trim();
+  const duplicate = await db.status.findFirst({ where: { projectId: id, name }, select: { id: true } });
+  if (duplicate) return fail(409, "conflict", "Status name already exists.");
   const count = await db.status.count({ where: { projectId: id } });
   // Round 2: default the timer role by category — Done finishes, todo shows no
   // timer, in-progress columns track time with manual Start/Stop buttons.
@@ -86,13 +113,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
   try {
     const status = await db.status.create({
-      data: { projectId: id, name: parsed.data.name.trim(), category: parsed.data.category, color: parsed.data.color ?? "#94a3b8", position: count, timerRole },
+      data: { projectId: id, name, category: parsed.data.category, color: parsed.data.color ?? "#94a3b8", position: count, timerRole },
     });
     await audit(db, { actorId: auth.user.id, action: "workflow.status_create", entity: "status", entityId: status.id, ip: clientIp(req) });
     publish(id, "workflow_changed", {});
     return ok({ status }, 201);
-  } catch {
-    return fail(409, "conflict", "Status name already exists.");
+  } catch (e) {
+    return fail(400, "validation", e instanceof Error ? e.message : "Could not create the status.");
   }
 }
 
@@ -107,8 +134,8 @@ const PatchBody = z.object({
   timerRole: z.enum(["NONE", "TRACK", "FINAL"]).optional(),
   roleIds: z.array(z.string()).optional(),
   issueTypeIds: z.array(z.string()).optional(),
-  // Role-name tags suggested by a status (replace-the-set semantics).
-  designationTags: z.array(z.string().max(60)).optional(),
+  // Role names suggested by a status (replace-the-set semantics, role ids).
+  designationRoleIds: z.array(z.string()).optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -131,8 +158,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (Object.keys(data).length > 0) {
       await db.status.updateMany({ where: { id: parsed.data.refId, projectId: id }, data });
     }
-    if (parsed.data.designationTags !== undefined) {
-      await replaceStatusDesignations(db, parsed.data.refId, parsed.data.designationTags);
+    if (parsed.data.designationRoleIds !== undefined) {
+      await replaceStatusDesignations(db, parsed.data.refId, parsed.data.designationRoleIds);
     }
   } else {
     const data: Record<string, unknown> = {};

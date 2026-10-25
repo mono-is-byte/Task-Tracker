@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { labelKey, memberLabel, rolesWithoutDesignation, userOptionLabel } from "../src/lib/memberLabel";
+import { labelKey, memberLabel, memberRoleLabels, rolesWithoutDesignation, userOptionLabel } from "../src/lib/memberLabel";
 
 /**
  * The user-picker label contract (item 2): "Name - Designation", designation
@@ -65,6 +65,27 @@ describe("userOptionLabel — picker variant", () => {
     expect(userOptionLabel({ name: "A", designationName: "QA", active: false })).toBe("A - QA (inactive)");
     expect(userOptionLabel({ name: "A", designationName: "QA", active: true })).toBe("A - QA");
     expect(userOptionLabel({ name: "A", designationName: "QA" })).toBe("A - QA");
+  });
+});
+
+describe("memberRoleLabels — one Role / Designation column", () => {
+  it("shows a role that is identical to the designation only once", () => {
+    expect(memberRoleLabels(["Developer"], "Developer")).toEqual(["Developer"]);
+    expect(memberRoleLabels(["Developer"], " developer ")).toEqual(["Developer"]);
+  });
+
+  it("falls back to the designation when the member has no project role", () => {
+    expect(memberRoleLabels([], "IT Support Executive")).toEqual(["IT Support Executive"]);
+  });
+
+  it("keeps genuinely different role and designation labels", () => {
+    expect(memberRoleLabels(["Developer", "QA"], "Project Manager"))
+      .toEqual(["Developer", "QA", "Project Manager"]);
+  });
+
+  it("returns an empty list when neither is set", () => {
+    expect(memberRoleLabels([], null)).toEqual([]);
+    expect(memberRoleLabels(["  "], "   ")).toEqual([]);
   });
 });
 

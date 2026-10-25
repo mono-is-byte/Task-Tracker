@@ -63,7 +63,7 @@ const BASE_COLS = [
   "assignedBy", "assignee", "testedBy",
   "priority", "type",
   "startDate", "endDate", "estHours", "estDays", "rdTime",
-  "epic", "notes",
+  "notes",
   "timerStart", "timerDue", "timerState", "timerActual",
   "createdAt", "updatedAt",
 ] as const;
@@ -71,6 +71,13 @@ type BaseCol = (typeof BASE_COLS)[number];
 type Col = BaseCol | `cf:${string}`;
 /** Hidden by default (still available via "Hide column…"/show list). */
 const DEFAULT_HIDDEN: Col[] = ["rdTime", "createdAt", "updatedAt"];
+
+/**
+ * Core columns that can never be hidden. The Board/drawer description belongs
+ * beside the task title, so it is always rendered even when an old saved layout
+ * (or a stray picker entry) lists it in `hidden`.
+ */
+const ALWAYS_VISIBLE: Col[] = ["description"];
 
 const RO_COLS = new Set<Col>(["key", "estDays", "timerStart", "timerActual", "createdAt", "updatedAt", "assignedBy"]);
 
@@ -95,7 +102,12 @@ function readTableLayout(projectId: string): { hidden?: Col[]; widths?: Record<s
     if (!raw) return {};
     const parsed = JSON.parse(raw) as { hidden?: unknown; widths?: unknown };
     const hidden = Array.isArray(parsed.hidden)
-      ? (parsed.hidden.filter((c) => typeof c === "string") as Col[])
+      ? (parsed.hidden.filter(
+          (c): c is Col =>
+            typeof c === "string" &&
+            !ALWAYS_VISIBLE.includes(c as Col) &&
+            (c.startsWith("cf:") || (BASE_COLS as readonly string[]).includes(c)),
+        ))
       : undefined;
     let widths: Record<string, number> | undefined;
     if (parsed.widths && typeof parsed.widths === "object" && !Array.isArray(parsed.widths)) {
@@ -439,7 +451,6 @@ export default function TablePage() {
   const [fAssignee, setFAssignee] = useState("");
   const [fAssignedBy, setFAssignedBy] = useState("");
   const [fStatus, setFStatus] = useState("");
-  const [fEpic, setFEpic] = useState("");
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: "serial", dir: 1 });
   const [groupBy, setGroupBy] = useState("");
   const [hidden, setHidden] = useState<Col[]>(DEFAULT_HIDDEN);
@@ -501,7 +512,6 @@ export default function TablePage() {
       if (fAssignedBy === "none" && t.assignedById) return false;
       if (fAssignedBy && fAssignedBy !== "none" && (t.assignedById ?? "") !== fAssignedBy) return false;
       if (fStatus && t.statusId !== fStatus) return false;
-      if (fEpic && (t.epicId ?? "") !== fEpic) return false;
       return true;
     });
     const val = (t: Task, k: string): string | number => {
@@ -518,7 +528,6 @@ export default function TablePage() {
         case "assignedBy": return t.assignedBy?.name ?? "";
         case "testedBy": return t.testedBy?.name ?? "";
         case "type": return t.type?.name ?? "";
-        case "epic": return t.epic?.name ?? "";
         case "notes": return buildTaskNotes(t.comments).map((n) => n.text).join(" ").toLowerCase();
         case "startDate": return t.startDate ?? "";
         case "endDate": return t.endDate ?? "";
@@ -539,7 +548,7 @@ export default function TablePage() {
       return (va < vb ? -1 : va > vb ? 1 : 0) * sort.dir;
     });
     return arr;
-  }, [rows, sort, fSearch, fAssignee, fAssignedBy, fStatus, fEpic, lookups]);
+  }, [rows, sort, fSearch, fAssignee, fAssignedBy, fStatus, lookups]);
 
   const grouped = useMemo(() => {
     if (!groupBy) return [{ name: "", items: sorted }];
@@ -595,7 +604,11 @@ export default function TablePage() {
       ? "title" : c === "timerDue" ? "dueAt" : c === "timerState" ? "title" : c;
   }
 
-  const visible = ALL.filter((c) => !hidden.includes(c) && (c.startsWith("cf:") || rule(colField(c)) !== "hidden"));
+  const visible = ALL.filter(
+    (c) =>
+      (ALWAYS_VISIBLE.includes(c) || !hidden.includes(c)) &&
+      (c.startsWith("cf:") || rule(colField(c)) !== "hidden"),
+  );
 
   function startResize(col: Col, e: React.MouseEvent) {
     const th = (e.currentTarget as HTMLElement).closest("th");
@@ -760,10 +773,6 @@ export default function TablePage() {
         return canManageRow(t) && rule("title") === "editable"
           ? <TextCell value={t.title} col={c} onCommit={(v) => commit(t, { title: v })} />
           : <span>{t.title}</span>;
-      case "description":
-        return rule("description") === "editable"
-          ? <TextCell value={t.description ?? ""} col={c} multiline onCommit={(v) => commit(t, { description: v || null })} />
-          : <span className="max-w-40 truncate" title={t.description ?? ""}>{t.description ?? "—"}</span>;
       case "status": return statusCell(t);
       case "priority":
         return can("change_priority") || can("edit_task_own")
@@ -789,10 +798,6 @@ export default function TablePage() {
         return rule("type") === "editable" || can("edit_task_all") || m.isSuperAdmin
           ? <SelectCell col={c} value={t.typeId} options={lk.issueTypes} onCommit={(v) => commit(t, { typeId: v })} />
           : (t.type?.name ?? "—");
-      case "epic":
-        return rule("epic") === "editable"
-          ? <SelectCell col={c} value={t.epicId} options={lk.epics} onCommit={(v) => commit(t, { epicId: v })} />
-          : (t.epic?.name ?? "—");
       case "description":
         return rule("description") === "editable"
           ? <LongTextCell value={t.description ?? ""} editable={rule("description") === "editable"} onCommit={(v) => commit(t, { description: v })} />
@@ -867,7 +872,7 @@ export default function TablePage() {
     priority: "Priority",
     type: "Issue type", startDate: "Start", endDate: "End",
     estHours: "Est. Hrs", estDays: "Est. Days", rdTime: "R&D Hrs",
-    epic: "Epic", description: "Description", notes: "Comments & notes",
+    description: "Description", notes: "Comments & notes",
     timerStart: "Start time", timerDue: "Due time", timerState: "Timer", timerActual: "Total time",
     createdAt: "Created", updatedAt: "Updated",
   };
@@ -884,7 +889,6 @@ export default function TablePage() {
     if (fAssignee) q.set("assignee", fAssignee);
     if (fAssignedBy) q.set("assignedBy", fAssignedBy);
     if (fStatus) q.set("status", fStatus);
-    if (fEpic) q.set("epic", fEpic);
     const s = q.toString();
     return s ? `&${s}` : "";
   })();
@@ -908,10 +912,6 @@ export default function TablePage() {
           <option value="">All statuses</option>
           {lookups.statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
-        <select value={fEpic} onChange={(e) => setFEpic(e.target.value)} className={fieldCls}>
-          <option value="">All epics</option>
-          {lookups.epics.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
         <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className={fieldCls}>
           <option value="">No grouping</option>
           <option value="epic">Group: Epic</option>
@@ -922,7 +922,7 @@ export default function TablePage() {
           value="" onChange={(e) => { if (e.target.value) setHidden((h) => h.includes(e.target.value as Col) ? h : [...h, e.target.value as Col]); }}
           className={fieldCls}>
           <option value="">Hide column…</option>
-          {visible.map((c) => <option key={c} value={c}>{headerOf(c)}</option>)}
+          {visible.filter((c) => !ALWAYS_VISIBLE.includes(c)).map((c) => <option key={c} value={c}>{headerOf(c)}</option>)}
         </select>
         <select
           value="" onChange={(e) => { if (e.target.value) setHidden((h) => h.filter((c) => c !== e.target.value as Col)); }}
@@ -1015,7 +1015,7 @@ export default function TablePage() {
             if (!viewName.trim()) return;
             await api(`/api/projects/${projectId}/views`, {
               method: "POST",
-              body: JSON.stringify({ name: viewName, scope: "table", config: { fSearch, fAssignee, fAssignedBy, fStatus, fEpic } }),
+              body: JSON.stringify({ name: viewName, scope: "table", config: { fSearch, fAssignee, fAssignedBy, fStatus } }),
             });
             setViewName("");
             api<{ views: { id: string; name: string; config: Record<string, string> }[] }>(`/api/projects/${projectId}/views?scope=table`).then((d) => setViews(d.views));
@@ -1026,7 +1026,7 @@ export default function TablePage() {
             onClick={() => {
               setFSearch(v.config.fSearch ?? "");
               setFAssignee(v.config.fAssignee ?? ""); setFAssignedBy(v.config.fAssignedBy ?? "");
-              setFStatus(v.config.fStatus ?? ""); setFEpic(v.config.fEpic ?? "");
+              setFStatus(v.config.fStatus ?? "");
             }}
             className="tt-btn" title={`Apply saved view “${v.name}”`}>{v.name}</button>
         ))}

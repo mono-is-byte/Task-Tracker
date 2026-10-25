@@ -66,6 +66,28 @@ export function userOptionLabel(m: MemberLabelInput & { active?: boolean | null 
 }
 
 /**
+ * One display list for a single "Role / Designation" column: the project role
+ * names first, then the designation, with duplicates collapsed (a member whose
+ * project role and designation are both "Developer" sees one chip, not two).
+ * The project role is the permission-relevant label, so it wins the ordering;
+ * the designation still shows when the member has no project role.
+ */
+export function memberRoleLabels(roleNames: string[], designationName?: string | null): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw?: string | null) => {
+    if (!raw) return;
+    const text = tidy(raw);
+    if (!text || seen.has(labelKey(text))) return;
+    seen.add(labelKey(text));
+    out.push(text);
+  };
+  for (const r of roleNames) push(r);
+  push(designationName);
+  return out;
+}
+
+/**
  * Drop role names that merely repeat the designation (case/whitespace
  * differences count) — used where designation and roles are rendered as
  * separate chips, so one person never shows the same label twice.

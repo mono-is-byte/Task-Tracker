@@ -9,6 +9,31 @@ import { memberLabel, userOptionLabel } from "@/lib/memberLabel";
 import { CLEAR_ISSUE_TYPE } from "@/lib/lookups";
 import { IconTrash, IconX } from "@/components/icons";
 
+/**
+ * One-click starter statuses — the same column set the demo boards use, so a
+ * fresh project can be set up in a few clicks instead of typing every name.
+ * Chips add immediately; existing names are disabled.
+ */
+const STATUS_PRESETS: { name: string; category: "todo" | "inprogress" | "done"; color: string }[] = [
+  { name: "To Do", category: "todo", color: "#64748b" },
+  { name: "In Progress", category: "inprogress", color: "#3b82f6" },
+  { name: "Development Done", category: "inprogress", color: "#8b5cf6" },
+  { name: "In Testing", category: "inprogress", color: "#f59e0b" },
+  { name: "Re-open", category: "inprogress", color: "#ef4444" },
+  { name: "Done", category: "done", color: "#22c55e" },
+];
+
+/** Common flows, resolved by status NAME; only offered when both exist. */
+const FLOW_PRESETS: [string, string][] = [
+  ["To Do", "In Progress"],
+  ["In Progress", "Development Done"],
+  ["Development Done", "In Testing"],
+  ["In Testing", "Done"],
+  ["In Testing", "Re-open"],
+  ["Re-open", "In Progress"],
+  ["In Progress", "Done"],
+];
+
 export default function SettingsPage() {
   const params = useParams<{ id: string }>();
   const projectId = params.id;
@@ -28,7 +53,7 @@ export default function SettingsPage() {
     /** Phase 1: role ids suggested per status (never free text). */
     designationRoleIds: Record<string, string[]>;
   } | null>(null);
-  const [newStatus, setNewStatus] = useState({ name: "", category: "todo", color: "#64748b" });
+  const [statusBusy, setStatusBusy] = useState(false);
   const [newTrans, setNewTrans] = useState({ fromId: "", toId: "", roleIds: [] as string[] });
   /** Transition row being re-roled inline (null = no row in edit mode). */
   const [transEdit, setTransEdit] = useState<{ id: string; roleIds: string[] } | null>(null);
@@ -203,6 +228,104 @@ export default function SettingsPage() {
       setMsg("Transition added.");
       loadAll();
     } catch (e) { setMsg(e instanceof Error ? e.message : "Create failed."); }
+  }
+
+  /** Create a status with client-side validation (empty / duplicate names). */
+  async function createStatus(name: string, category: string, color: string) {
+    const clean = name.trim();
+    if (!clean) { setMsg("Pick a preset status below."); return; }
+    if ((wf?.statuses ?? []).some((s) => s.name.toLowerCase() === clean.toLowerCase())) {
+      setMsg(`Status “${clean}” already exists.`);
+      return;
+    }
+    setMsg("");
+    setStatusBusy(true);
+    try {
+      await api(`/api/projects/${projectId}/workflow`, {
+        method: "POST",
+        body: JSON.stringify({ name: clean, category, color }),
+      });
+      setMsg(`Status “${clean}” added.`);
+      await loadAll();
+      refresh();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Could not add the status.");
+    } finally { setStatusBusy(false); }
+  }
+
+  /** Preset chip: add one starter status (existing names are disabled in the UI). */
+  async function addStatusPreset(p: (typeof STATUS_PRESETS)[number]) {
+    await createStatus(p.name, p.category, p.color);
+  }
+
+  /** Add every starter status this project is still missing, in one go. */
+  async function addAllStatusPresets() {
+    const missing = STATUS_PRESETS.filter(
+      (p) => !(wf?.statuses ?? []).some((s) => s.name.toLowerCase() === p.name.toLowerCase()),
+    );
+    if (missing.length === 0) { setMsg("Every preset status is already there."); return; }
+    setMsg("");
+    setStatusBusy(true);
+    try {
+      for (const p of missing) {
+        await api(`/api/projects/${projectId}/workflow`, {
+          method: "POST",
+          body: JSON.stringify({ name: p.name, category: p.category, color: p.color }),
+        });
+      }
+      setMsg(`Added ${missing.length} preset status(es).`);
+      await loadAll();
+      refresh();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Could not add the preset statuses.");
+    } finally { setStatusBusy(false); }
+  }
+
+  /** Flow presets that can be created right now (both status names exist). */
+  const flowPresets = FLOW_PRESETS.flatMap(([from, to]) => {
+    const f = (wf?.statuses ?? []).find((s) => s.name === from);
+    const t = (wf?.statuses ?? []).find((s) => s.name === to);
+    if (!f || !t) return [];
+    return [{ fromId: f.id, toId: t.id, label: `${f.name} → ${t.name}` }];
+  });
+
+  async function addFlow(fromId: string, toId: string) {
+    setMsg("");
+    setTransBusy(true);
+    try {
+      await api(`/api/projects/${projectId}/workflow?kind=transition`, {
+        method: "POST",
+        body: JSON.stringify({ fromId, toId, roleIds: [] }),
+      });
+      setNewTrans({ fromId: "", toId: "", roleIds: [] });
+      setTransEdit(null);
+      setMsg("Transition added.");
+      await loadAll();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Could not add the transition.");
+    } finally { setTransBusy(false); }
+  }
+
+  /** Add every preset flow that is not defined yet. */
+  async function addAllFlows() {
+    const missing = flowPresets.filter(
+      (p) => !(wf?.transitions ?? []).some((t) => t.fromId === p.fromId && t.toId === p.toId),
+    );
+    if (missing.length === 0) { setMsg("Every preset flow is already there."); return; }
+    setMsg("");
+    setTransBusy(true);
+    try {
+      for (const p of missing) {
+        await api(`/api/projects/${projectId}/workflow?kind=transition`, {
+          method: "POST",
+          body: JSON.stringify({ fromId: p.fromId, toId: p.toId, roleIds: [] }),
+        });
+      }
+      setMsg(`Added ${missing.length} preset transition(s).`);
+      await loadAll();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Could not add the preset flows.");
+    } finally { setTransBusy(false); }
   }
 
   /** Save the allowed-role list of an existing transition (PATCH kind=transition). */
@@ -571,6 +694,39 @@ export default function SettingsPage() {
             </tbody>
           </table>
           {canWf && (
+            <div className="mt-2 flex flex-wrap items-center gap-1 text-[11px]">
+              <span className="text-slate-500">Preset flows:</span>
+              {flowPresets.length === 0 && (
+                <span className="text-slate-500">add statuses first — presets appear here.</span>
+              )}
+              {flowPresets.map((p) => {
+                const exists = (wf?.transitions ?? []).some((t) => t.fromId === p.fromId && t.toId === p.toId);
+                return (
+                  <button
+                    key={p.label}
+                    type="button"
+                    disabled={exists || transBusy}
+                    onClick={() => void addFlow(p.fromId, p.toId)}
+                    title={exists ? `${p.label} already exists` : `Add ${p.label}`}
+                    className="rounded-full border border-line px-2 py-0.5 disabled:opacity-40"
+                  >
+                    {exists ? `✓ ${p.label}` : `+ ${p.label}`}
+                  </button>
+                );
+              })}
+              {flowPresets.length > 0 && (
+                <button
+                  type="button"
+                  disabled={transBusy}
+                  onClick={() => void addAllFlows()}
+                  className="ml-1 rounded-full border border-indigo-500 px-2 py-0.5 font-medium text-indigo-600 disabled:opacity-40 dark:text-indigo-300"
+                >
+                  + Add all missing
+                </button>
+              )}
+            </div>
+          )}
+          {canWf && (
             <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-line pt-3 text-xs">
               <label className="flex flex-col gap-0.5">
                 <span className="text-[11px] text-slate-500">From</span>
@@ -701,23 +857,31 @@ export default function SettingsPage() {
           ))}
         </ul>
         {canWf && (
-          <div className="flex gap-1">
-            <input value={newStatus.name} onChange={(e) => setNewStatus({ ...newStatus, name: e.target.value })} placeholder="Name" className={inp} />
-            <select value={newStatus.category} onChange={(e) => setNewStatus({ ...newStatus, category: e.target.value })} className={inp}>
-              <option value="todo">To Do</option>
-              <option value="inprogress">In Progress</option>
-              <option value="done">Done</option>
-            </select>
-            <input type="color" value={newStatus.color} onChange={(e) => setNewStatus({ ...newStatus, color: e.target.value })} />
+          <div className="mb-2 flex flex-wrap items-center gap-1 text-[11px]">
+            <span className="text-slate-500">Preset statuses:</span>
+            {STATUS_PRESETS.map((p) => {
+              const exists = (wf?.statuses ?? []).some((s) => s.name.toLowerCase() === p.name.toLowerCase());
+              return (
+                <button
+                  key={p.name}
+                  type="button"
+                  disabled={exists || statusBusy}
+                  onClick={() => void addStatusPreset(p)}
+                  title={exists ? `${p.name} already exists` : `Add “${p.name}” (${p.category})`}
+                  className="rounded-full border border-line px-2 py-0.5 disabled:opacity-40"
+                >
+                  {exists ? `✓ ${p.name}` : `+ ${p.name}`}
+                </button>
+              );
+            })}
             <button
-              onClick={async () => {
-                try {
-                  await api(`/api/projects/${projectId}/workflow`, { method: "POST", body: JSON.stringify(newStatus) });
-                  setNewStatus({ name: "", category: "todo", color: "#64748b" });
-                  loadAll(); refresh();
-                } catch (e) { setMsg(e instanceof Error ? e.message : "Create failed."); }
-              }}
-              className={btn}>Add</button>
+              type="button"
+              disabled={statusBusy}
+              onClick={() => void addAllStatusPresets()}
+              className="ml-1 rounded-full border border-indigo-500 px-2 py-0.5 font-medium text-indigo-600 disabled:opacity-40 dark:text-indigo-300"
+            >
+              + Add all missing
+            </button>
           </div>
         )}
 
