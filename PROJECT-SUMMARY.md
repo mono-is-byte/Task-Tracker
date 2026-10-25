@@ -348,7 +348,6 @@ otherwise `turso:migrate` and `pretest.mjs` diverge.
 
 ## 14. Current state (2026-10-25)
 
-Completed but possibly uncommitted:
 - Phase 14: Vercel + Turso serverless support (`db.ts` dual adapter, `migrate-turso.mjs`,
   `prisma.config.ts`, env docs, README/PLAN).
 - Phase 15: latency work — `vercel.json` region `bom1`, React-`cache`d `getViewer`,
