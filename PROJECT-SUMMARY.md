@@ -1,4 +1,4 @@
-# TaskTracker — Project Handoff / AI Context
+# TaskTracker — Project Handoff
 
 > Purpose of this file: give another engineer or AI agent (e.g. Claude) everything
 > needed to understand, run, change and deploy this project without re-discovering it.
