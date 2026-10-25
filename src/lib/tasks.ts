@@ -170,7 +170,7 @@ export function stripHiddenFields<T extends Record<string, unknown>>(row: T, fie
 
 /** The serialized task row every view renders (identical to `listTasks` rows). */
 function serializeFullTask<T extends Record<string, unknown>>(row: T, ctx: TaskContext) {
-  return serializeTask(ctx.projectKey, ctx.hoursPerDay, row) as T & Record<string, unknown>;
+  return serializeTask(ctx.projectKey, ctx.hoursPerDay, row) as unknown as T & Record<string, unknown>;
 }
 
 /** The authoritative, serialized row for one task — same shape as `listTasks`. */
