@@ -16,14 +16,14 @@ Release sections will be added here as versions are tagged.
   role's live name and shows "No role" when unset. A one-time repair pass
   (`npm run repair:designations`) fixes stale rows.
 - **Real workflow enforcement**: a status move is allowed only when an explicit
-  transition row exists — transitions are the single source of truth. The forward-only
+  transition row exists - transitions are the single source of truth. The forward-only
   rule is gone and bypass is an explicit `bypass_transitions` permission flag (Project
   Manager only by default, editable on the Roles page). Super Admins bypass.
 - **Per-status suggested designations** are picked from real roles (multi-select of role
   ids) instead of free text.
 - **Field-level rules** (`hidden` / `readonly` / `editable`) are enforced server-side on
   create, edit, bulk and import; hidden fields are stripped from every response.
-- **Profile: optional gender + editable username** — gender (Male / Female / Other /
+- **Profile: optional gender + editable username** - gender (Male / Female / Other /
   Prefer not to say) shows in Profile and Users; the username change is
   password-confirmed, audited, rate-limited and checked case-insensitively (soft-deleted
   accounts included). Login still accepts an email **or** a username.
@@ -42,16 +42,16 @@ Release sections will be added here as versions are tagged.
   today-marker axis, and start → due bars falling back to timer instants.
 - **Calendar** (month/week) with a My/All toggle, project and assignee filters, a colour
   legend, holiday tinting and PDF export.
-- **Holiday management** in Calendar Settings — add/edit date-range holidays with
-  duplicate and reversed-range validation — plus **working-day exceptions** that open the
+- **Holiday management** in Calendar Settings - add/edit date-range holidays with
+  duplicate and reversed-range validation - plus **working-day exceptions** that open the
   office without deleting the holiday.
 - **Dashboard** with KPI cards, a completion bar, status/priority/member distributions,
-  "assigned to me", the QA queue, overdue work and recent activity — exportable to PDF
+  "assigned to me", the QA queue, overdue work and recent activity - exportable to PDF
   and Excel.
 - **Workload** view against per-project and per-user working hours, honouring holidays
   and working-day exceptions.
 - **Reports** with status distribution, open tasks per assignee, a standalone
-  **QA Queue — In Testing per Tester** section, estimate vs actual and overdue —
+  **QA Queue - In Testing per Tester** section, estimate vs actual and overdue -
   exportable to PDF.
 - **Per-project workflow** editing (statuses, transitions with allowed roles) with
   forward-only enforcement, a manager bypass and status-only moves for QA.
@@ -92,7 +92,7 @@ Release sections will be added here as versions are tagged.
 
 - **Table and board time columns** now show **Development time** (tracked in the
   “In Progress” stage), **Testing time** (tracked in “In Testing”) and their **Total time**;
-  board cards show only the times relevant to their column — Development in In Progress /
+  board cards show only the times relevant to their column - Development in In Progress /
   Development Done, all three from In Testing onwards. The old Start time, Due time and
   Timer columns are gone.
 - **Workflow denials on the board** now revert the drag and raise a toast (the API
@@ -101,7 +101,7 @@ Release sections will be added here as versions are tagged.
   pickers, and help text that matches the enforced rules.
 - **Comments "viewers may comment"** is keyed off permissions instead of the
   `Viewer / Stakeholder` role name.
-- Board, Table, Timeline and Reports share **one task store per project** — optimistic
+- Board, Table, Timeline and Reports share **one task store per project** - optimistic
   updates with rollback and SSE refresh, so a change in one view appears in the others
   immediately.
 - **Designations** became references to Roles & Permissions roles instead of a separate
@@ -126,7 +126,7 @@ Release sections will be added here as versions are tagged.
 
 - **Fresh-database seeding** no longer crashes: writes to columns that no longer exist
   were removed, and seeded designations now reference role ids.
-- Quick-created and edited tasks render fully — create/update responses return the
+- Quick-created and edited tasks render fully - create/update responses return the
   complete serialized row instead of leaving stale chips in Board/Table.
 - **Project Settings no longer blanks** when a single card's fetch is forbidden; each
   section loads on its own.
