@@ -42,7 +42,7 @@ Migration: `20261024182738_drop_legacy_sprint_model` (SQLite table rebuilds that
 - `Story.status` / `Story.position`: genuinely used today, but only by the Stories
   API â€” confirm the Stories feature itself is still wanted before any deeper cut.
 
-## Phase 11.1 — Story feature removed (2026-10-25)
+## Story feature removed (2026-10-25) - will re-add later
 - Removed Story model, Task.storyId, Epic.stories, Story API, UI, import/export, tests.
 - Migration: 20261025120000_remove_story.
 - Data retained: backup/stories-export.json (7 stories, 10 linked tasks).
