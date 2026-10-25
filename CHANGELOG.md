@@ -90,6 +90,9 @@ Release sections will be added here as versions are tagged.
 
 ### Changed
 
+- **Table and board time columns** now show **Development time** (tracked in the
+  “In Progress” stage), **Testing time** (tracked in “In Testing”) and their **Total time**;
+  the old Start time, Due time and Timer columns are gone.
 - **Workflow denials on the board** now revert the drag and raise a toast (the API
   answers 403), and columns a task cannot legally move to are dimmed as a hint.
 - **Settings → Workflow** shows **live role names** in the suggestion and transition

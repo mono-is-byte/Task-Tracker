@@ -5,15 +5,16 @@ import { useParams, useSearchParams } from "next/navigation";
 import { api, fmtDate } from "@/lib/client";
 import { useProject } from "@/hooks/useProject";
 import { useTicker } from "@/hooks/useTicker";
-import { useTasks, patchTask, createTask, timerAction, refreshTasks, type TaskRow } from "@/lib/taskStore";
-import { fmtDateTime, fmtDur, timerChipClass, timerSummary } from "@/lib/timerFormat";
+import { useTasks, patchTask, createTask, refreshTasks, type TaskRow } from "@/lib/taskStore";
+import { fmtDur } from "@/lib/timerFormat";
+import { liveStageTimes } from "@/lib/stageTime";
 import { memberLabel, userOptionLabel } from "@/lib/memberLabel";
 import { buildTaskNotes, filterVisibleNotes, noteText, notesAsLines } from "@/lib/notes";
 import Avatar from "@/components/Avatar";
 import TaskDrawer from "@/components/TaskDrawer";
 import TaskMenu from "@/components/TaskMenu";
 import AssignStepDialog from "@/components/AssignStepDialog";
-import { IconCheck, IconDownload, IconLock, IconPause, IconPlay, IconPlus, IconUpload, IconWarning } from "@/components/icons";
+import { IconCheck, IconDownload, IconLock, IconPlus, IconUpload, IconWarning } from "@/components/icons";
 
 /**
  * Table view — a fully editable, live view of the SAME task data used by the
@@ -25,7 +26,7 @@ import { IconCheck, IconDownload, IconLock, IconPause, IconPlay, IconPlus, IconU
  * Inline editing rules: save on blur/Enter, cancel on Esc, optimistic with a
  * per-cell saving/saved/error indicator (the store rolls the row back when
  * the server rejects the change). Computed/system columns (key, est. days,
- * total time, start time, created/updated) are read-only and
+ * development / testing / total time, created/updated) are read-only and
  * visually marked with a lock icon. Status changes reuse the board's rules
  * including the Assign step and the stage-timer bookkeeping (server-side).
  */
@@ -48,6 +49,8 @@ type Task = TaskRow & {
   startDate: string | null; endDate: string | null; dueAt: string | null;
   startedAt: string | null; stoppedAt: string | null; stageEnteredAt: string | null; totalSeconds: number | null;
   timerState: string; timerWorkedMs: number | null; timerRemainingMs: number | null; timerOverdueMs: number | null;
+  /** Closed "In Progress" / "In Testing" time (ms); the running segment is added live. */
+  devTimeMs: number | null; testTimeMs: number | null;
   createdAt: string; updatedAt: string;
 };
 
@@ -64,7 +67,7 @@ const BASE_COLS = [
   "priority", "type",
   "startDate", "endDate", "estHours", "estDays", "rdTime",
   "notes",
-  "timerStart", "timerDue", "timerState", "timerActual",
+  "devTime", "testTime", "totalTime",
   "createdAt", "updatedAt",
 ] as const;
 type BaseCol = (typeof BASE_COLS)[number];
@@ -79,11 +82,11 @@ const DEFAULT_HIDDEN: Col[] = ["rdTime", "createdAt", "updatedAt"];
  */
 const ALWAYS_VISIBLE: Col[] = ["description"];
 
-const RO_COLS = new Set<Col>(["key", "estDays", "timerStart", "timerActual", "createdAt", "updatedAt", "assignedBy"]);
+const RO_COLS = new Set<Col>(["key", "estDays", "devTime", "testTime", "totalTime", "createdAt", "updatedAt", "assignedBy"]);
 
 /** Numeric/duration columns read better right-aligned (table redesign). */
 const RIGHT_COLS = new Set<Col>([
-  "estHours", "estDays", "rdTime", "timerStart", "timerDue", "timerActual", "createdAt", "updatedAt",
+  "estHours", "estDays", "rdTime", "devTime", "testTime", "totalTime", "createdAt", "updatedAt",
 ]);
 
 /**
@@ -531,10 +534,9 @@ export default function TablePage() {
         case "notes": return buildTaskNotes(t.comments).map((n) => n.text).join(" ").toLowerCase();
         case "startDate": return t.startDate ?? "";
         case "endDate": return t.endDate ?? "";
-        case "timerDue": return t.dueAt ?? "";
-        case "timerStart": return t.startedAt ?? "";
-        case "timerState": return t.timerState;
-        case "timerActual": return t.timerWorkedMs ?? -1;
+        case "devTime": return t.devTimeMs ?? 0;
+        case "testTime": return t.testTimeMs ?? 0;
+        case "totalTime": return (t.devTimeMs ?? 0) + (t.testTimeMs ?? 0);
         case "createdAt": return t.createdAt;
         case "updatedAt": return t.updatedAt;
         default:
@@ -585,7 +587,6 @@ export default function TablePage() {
   const createStatusName =
     (lk.statuses.find((s) => s.category === "todo") ?? lk.statuses[0])?.name ?? "To Do";
   const rule = (f: string) => (m.isSuperAdmin ? "editable" : (m.fieldRules[f] ?? "readonly"));
-  const isManager = m.isSuperAdmin || m.perms.manage_workflow === true || m.perms.manage_archive === true;
   const canDeleteTask = m.perms.delete_task === true || m.isSuperAdmin;
   const canManageRow = (t: Task) =>
     m.isSuperAdmin || m.perms.edit_task_all === true ||
@@ -600,8 +601,8 @@ export default function TablePage() {
     // PHASE 4: the "assigned by" snapshot follows the assignee field's rule, so
     // a role that may not read the assignee never sees who assigned them.
     if (c === "assignedBy") return "assignee";
-    return c === "key" || c === "notes" || c === "timerStart" || c === "timerActual" || c === "createdAt" || c === "updatedAt"
-      ? "title" : c === "timerDue" ? "dueAt" : c === "timerState" ? "title" : c;
+    return c === "key" || c === "notes" || c === "devTime" || c === "testTime" || c === "totalTime" || c === "createdAt" || c === "updatedAt"
+      ? "title" : c;
   }
 
   const visible = ALL.filter(
@@ -748,9 +749,20 @@ export default function TablePage() {
             </span>
           );
         case "estDays": return <span className="text-slate-500" title="Computed from est. hours — read-only">{t.estDays ?? "—"}<LockMark /></span>;
-        case "timerStart": return <span className="text-slate-500" title="First Start click — read-only">{fmtDateTime(t.startedAt)}<LockMark /></span>;
-        case "timerActual":
-          return <span className="text-slate-500" title="Total tracked time — read-only">{t.timerState === "not_started" ? "—" : fmtDur(t.timerWorkedMs)}<LockMark /></span>;
+        case "devTime": case "testTime": case "totalTime": {
+          const live = liveStageTimes(t, now);
+          const ms = c === "devTime" ? live.developmentMs : c === "testTime" ? live.testingMs : live.totalMs;
+          const label = c === "devTime"
+            ? "Development time — tracked in the In Progress stage"
+            : c === "testTime"
+              ? "Testing time — tracked in the In Testing stage"
+              : "Total time — development + testing";
+          return (
+            <span className="tabular-nums text-slate-500" title={`${label} (read-only)`}>
+              {ms > 0 ? fmtDur(ms) : "—"}<LockMark />
+            </span>
+          );
+        }
         case "createdAt": return <span className="text-slate-500" title="Created — read-only">{new Date(t.createdAt).toLocaleDateString()}<LockMark /></span>;
         case "updatedAt": return <span className="text-slate-500" title="Last updated — read-only">{new Date(t.updatedAt).toLocaleDateString()}<LockMark /></span>;
         case "assignedBy":
@@ -816,36 +828,6 @@ export default function TablePage() {
         return rule(c) === "editable"
           ? <DateCell value={t[c]} col={c} onCommit={(v) => commit(t, { [c]: v })} />
           : fmtDate(t[c]);
-      case "timerDue":
-        return isManager
-          ? <DateCell value={t.dueAt} col={c} datetime onCommit={(v) => commit(t, { dueAt: v })} />
-          : fmtDateTime(t.dueAt);
-      case "timerState": {
-        // Start/Stop per tracked stage (item 5) — the server owns the logic.
-        const oper = isManager || (t.assigneeId != null && t.assigneeId === m.userId);
-        const isTrack = t.status.timerRole === "TRACK";
-        const showStart = oper && isTrack && (t.timerState === "not_started" || t.timerState === "paused");
-        const showStop = oper && isTrack && (t.timerState === "running" || t.timerState === "overdue");
-        return (
-          <span className="inline-flex items-center gap-1">
-            <span className={`rounded px-1 py-0.5 text-[10px] font-medium ${timerChipClass(t.timerState)}`}>{timerSummary(t, now)}</span>
-            {showStart && (
-              <button onClick={() => void timerAction(projectId, t.id, "start").catch((e) => setMsg(e instanceof Error ? e.message : "Timer failed."))}
-                title="Start the timer for this stage"
-                className="inline-flex items-center gap-0.5 rounded border border-blue-300 px-1 py-0.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950">
-                <IconPlay className="h-2.5 w-2.5" /> Start
-              </button>
-            )}
-            {showStop && (
-              <button onClick={() => void timerAction(projectId, t.id, "stop").catch((e) => setMsg(e instanceof Error ? e.message : "Timer failed."))}
-                title="Stop the timer (work on this stage is done)"
-                className="inline-flex items-center gap-0.5 rounded border border-red-300 px-1 py-0.5 text-[10px] font-semibold text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950">
-                <IconPause className="h-2.5 w-2.5" /> Stop
-              </button>
-            )}
-          </span>
-        );
-      }
       default:
         if (c.startsWith("cf:")) {
           const f = lk.customFields.find((x) => x.id === c.slice(3));
@@ -873,7 +855,7 @@ export default function TablePage() {
     type: "Issue type", startDate: "Start", endDate: "End",
     estHours: "Est. Hrs", estDays: "Est. Days", rdTime: "R&D Hrs",
     description: "Description", notes: "Comments & notes",
-    timerStart: "Start time", timerDue: "Due time", timerState: "Timer", timerActual: "Total time",
+    devTime: "Development time", testTime: "Testing time", totalTime: "Total time",
     createdAt: "Created", updatedAt: "Updated",
   };
   const headerOf = (c: Col) => c.startsWith("cf:")

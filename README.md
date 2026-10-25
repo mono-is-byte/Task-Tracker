@@ -78,9 +78,10 @@ would be regenerated for the new database.
   appears in the others immediately and no duplicate tasks are created.
 - **Task drawer** for comments, activity history, links (`blocks` / `relates`), labels,
   custom fields and Git branch.
-- **Task Timer** per stage: statuses define a timer role (`NONE` / `TRACK` / `FINAL`) so a
-  running segment can be started and stopped, auto-stops when the task moves on, and shows
-  total time once the task is Done.
+- **Development / Testing / Total time** from the stage timer: `TRACK` statuses offer
+  Start/Stop, a running segment auto-stops when the task moves on, and the time tracked in
+  “In Progress” (development) and “In Testing” (testing) rolls up into live
+  Development / Testing / Total columns on the table and board.
 - **Epics, stories** and structured task types (Task / Story / Bug / Epic / Sub-task).
 - **Priorities & issue types** are managed per project in Settings — create, edit
   (name / level / colour) and delete with duplicate checks; deleting an option that tasks

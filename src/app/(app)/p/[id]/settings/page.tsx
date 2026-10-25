@@ -772,7 +772,7 @@ export default function SettingsPage() {
         <h3 className="mb-1 text-sm font-bold">Statuses</h3>
         <p className="mb-2 text-[11px] text-slate-500">
           {canWf
-            ? "The only allowed status moves are the Transitions defined in this project — there is no automatic “forward” rule. Project Manager and Super Admin may move to any status. The timer role decides which columns offer Start/Stop (Track), show only the total (Final — Done), or no timer at all (None)."
+            ? "The only allowed status moves are the Transitions defined in this project — there is no automatic “forward” rule. Project Manager and Super Admin may move to any status. The timer role decides which columns offer Start/Stop (Track), show only the total (Final — Done), or no timer at all (None). Time tracked in the “In Progress” stage becomes Development time, “In Testing” becomes Testing time, and Total time is their sum — renaming those statuses changes which bucket their time lands in."
             : "Read-only — only Admin/PM can edit the workflow."}
         </p>
         <ul className="mb-2 text-xs">

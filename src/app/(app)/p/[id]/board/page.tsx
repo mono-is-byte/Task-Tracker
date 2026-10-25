@@ -11,7 +11,8 @@ import TaskDrawer from "@/components/TaskDrawer";
 import TaskMenu from "@/components/TaskMenu";
 import AssignStepDialog from "@/components/AssignStepDialog";
 import Avatar from "@/components/Avatar";
-import { timerChipClass, timerSummary, fmtDur } from "@/lib/timerFormat";
+import { fmtDur } from "@/lib/timerFormat";
+import { liveStageTimes } from "@/lib/stageTime";
 import { canTransition } from "@/lib/workflow";
 import { buildTaskNotes, noteText } from "@/lib/notes";
 import { IconCalendar, IconClipboardCheck, IconPause, IconPlay, IconX } from "@/components/icons";
@@ -31,6 +32,8 @@ type Card = TaskRow & {
   startedAt: string | null; stoppedAt: string | null; dueAt: string | null;
   stageEnteredAt: string | null; totalSeconds: number | null;
   timerState: string; timerWorkedMs: number | null; timerRemainingMs: number | null; timerOverdueMs: number | null;
+  /** Closed "In Progress" / "In Testing" time (ms); the running segment is added live. */
+  devTimeMs: number | null; testTimeMs: number | null;
 };
 
 /** Left-border colour by timer state (colour + text label, never colour alone). */
@@ -239,36 +242,43 @@ export default function BoardPage() {
           {c.estDays != null && <span className="inline-flex items-center gap-0.5" title="Est. days"><IconCalendar className="h-3 w-3" /> {c.estDays}d</span>}
           {c.testedBy && <span className="inline-flex items-center gap-0.5" title={`Tested by ${c.testedBy.name}`}><IconClipboardCheck className="h-3 w-3" /> {initials(c.testedBy.name)}</span>}
         </div>
-        {c.status.timerRole !== "NONE" && (
-          <div className="mt-1 flex items-center gap-1">
-            <span className={`rounded px-1 py-0.5 text-[10px] font-medium ${timerChipClass(c.timerState)}`}>
-              {timerSummary(c, now)}
-            </span>
-            {showStart && (
-              <button
-                onClick={(e) => { e.stopPropagation(); void timerCardAction(c, "start"); }}
-                className="ml-auto inline-flex items-center gap-0.5 rounded border border-blue-300 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950"
-                title="Start the timer for this stage"
-              >
-                <IconPlay className="h-2.5 w-2.5" /> Start
-              </button>
-            )}
-            {showStop && (
-              <button
-                onClick={(e) => { e.stopPropagation(); void timerCardAction(c, "stop"); }}
-                className="ml-auto inline-flex items-center gap-0.5 rounded border border-red-300 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
-                title="Stop the timer (work on this stage is done)"
-              >
-                <IconPause className="h-2.5 w-2.5" /> Stop
-              </button>
-            )}
-          </div>
-        )}
-        {c.status.timerRole === "FINAL" && (
-          <div className="mt-1 text-[10px] font-medium text-green-700 dark:text-green-300">
-            Total time: {fmtDur(c.timerWorkedMs)}
-          </div>
-        )}
+        {(() => {
+          const live = liveStageTimes(c, now);
+          const showTimes = live.totalMs > 0 || showStart || showStop;
+          if (!showTimes) return null;
+          const timeText = (ms: number) => (ms > 0 ? fmtDur(ms) : "—");
+          return (
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted">
+              <span title="Development time — tracked in the In Progress stage">
+                Dev <span className="font-semibold tabular-nums text-slate-600 dark:text-slate-300">{timeText(live.developmentMs)}</span>
+              </span>
+              <span title="Testing time — tracked in the In Testing stage">
+                Test <span className="font-semibold tabular-nums text-slate-600 dark:text-slate-300">{timeText(live.testingMs)}</span>
+              </span>
+              <span title="Total time — development + testing">
+                Total <span className="font-semibold tabular-nums text-slate-600 dark:text-slate-300">{timeText(live.totalMs)}</span>
+              </span>
+              {showStart && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); void timerCardAction(c, "start"); }}
+                  className="ml-auto inline-flex items-center gap-0.5 rounded border border-blue-300 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950"
+                  title="Start the timer for this stage"
+                >
+                  <IconPlay className="h-2.5 w-2.5" /> Start
+                </button>
+              )}
+              {showStop && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); void timerCardAction(c, "stop"); }}
+                  className="ml-auto inline-flex items-center gap-0.5 rounded border border-red-300 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
+                  title="Stop the timer (work on this stage is done)"
+                >
+                  <IconPause className="h-2.5 w-2.5" /> Stop
+                </button>
+              )}
+            </div>
+          );
+        })()}
       </div>
     );
   }
