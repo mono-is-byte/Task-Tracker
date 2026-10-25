@@ -4,5 +4,5 @@ This software is provided "as is", without warranty of any kind. It is still bei
 
 - Not production-audited
 - Change all default/demo credentials
-- Back up your database
+- Back up the database
 - Review the code before deploying
