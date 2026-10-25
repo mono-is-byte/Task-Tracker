@@ -9,7 +9,7 @@ repo-wide grep across `src/`, `scripts/`, `prisma/`, `tests/`, `next.config.ts`,
 
 | # | Item | Kind | Evidence (refs) | Risk | Decision |
 |---|------|------|-----------------|------|----------|
-| 1 | `Sprint` model (+ `Sprint_projectId_key_key` index) | DB table | 0 references in `src/`; seed only listed it in a tolerant dynamic wipe list | Low — no route, no UI, no query ever touched it; the table was empty in the local DB | **Removed** |
+| 1 | `Sprint` model (+ `Sprint_projectId_key_key` index) | DB table | 0 references in `src/`; seed only listed it in a tolerant dynamic wipe list | Low - no route, no UI, no query ever touched it; the table was empty in the local DB | **Removed** |
 | 2 | `Project.sprints` relation | DB relation | tied to #1 | Low | **Removed** |
 | 3 | `Story.sprintId` + `Story.sprint` | DB column/FK | tied to #1 | Low | **Removed** |
 | 4 | `Task.sprintId` + `Task.sprint` + `@@index([projectId, sprintId])` | DB column/FK/index | tied to #1 | Low | **Removed** |
