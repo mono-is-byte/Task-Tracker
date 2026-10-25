@@ -8,7 +8,7 @@ import { useTicker } from "@/hooks/useTicker";
 import { useTasks, patchTask, createTask, timerAction, refreshTasks, type TaskRow } from "@/lib/taskStore";
 import { fmtDateTime, fmtDur, timerChipClass, timerSummary } from "@/lib/timerFormat";
 import { memberLabel, userOptionLabel } from "@/lib/memberLabel";
-import { buildTaskNotes, filterVisibleNotes, notesAsLines } from "@/lib/notes";
+import { buildTaskNotes, filterVisibleNotes, noteText, notesAsLines } from "@/lib/notes";
 import Avatar from "@/components/Avatar";
 import TaskDrawer from "@/components/TaskDrawer";
 import TaskMenu from "@/components/TaskMenu";
@@ -278,13 +278,13 @@ function NotesCell({ t }: { t: Task }) {
   const notes = buildTaskNotes(t.comments);
   const shown = notes.slice(-3);
   const more = notes.length - shown.length;
-  const tip = notes.map((n) => `${n.n}. ${n.text}`).join("\n");
+  const tip = notes.map((n) => `${n.n}. ${noteText(n)}`).join("\n");
   if (notes.length === 0) return <span className="text-slate-400">—</span>;
   return (
     <span className="block max-w-60 cursor-pointer" title={tip}>
       {shown.map((n) => (
         <span key={n.id} className="block truncate text-xs">
-          <span className="font-medium text-slate-500">{n.n}.</span> {n.text}
+          <span className="font-medium text-slate-500">{n.n}.</span> {noteText(n)}
         </span>
       ))}
       {more > 0 && <span className="text-xs text-slate-400">+{more} more</span>}
@@ -770,7 +770,7 @@ export default function TablePage() {
           ? <SelectCell col={c} value={t.priorityId} options={lk.priorities} onCommit={(v) => (v ? commit(t, { priorityId: v }) : Promise.resolve())} />
           : <span style={{ color: t.priority.color }}>● {t.priority.name}</span>;
       case "assignee":
-        return can("assign") || can("edit_task_own")
+        return can("assign")
           ? <SelectCell col={c} value={t.assigneeId} options={lk.members.map((x) => ({ id: x.userId, name: userOptionLabel(x) }))}
               onCommit={(v) => commit(t, { assigneeId: v })}
               renderOption={(o) => o.name} />
@@ -981,7 +981,7 @@ export default function TablePage() {
             <option value="">Set field…</option>
             <option value="statusId">Status</option>
             <option value="priorityId">Priority</option>
-            <option value="assigneeId">Assignee</option>
+            {can("assign") && <option value="assigneeId">Assignee</option>}
           </select>
           {bulkPatch === "statusId" && (
             <select value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} className={fieldCls}>

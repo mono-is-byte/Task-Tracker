@@ -371,6 +371,9 @@ model Comment {
   author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
   kind      String   @default("comment")
   body      String
+  /// Optional "solved" marker for comments/remarks/feedback. Null = still open.
+  /// Editing a note clears it (the UI then offers the Solve button again).
+  solvedAt  DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

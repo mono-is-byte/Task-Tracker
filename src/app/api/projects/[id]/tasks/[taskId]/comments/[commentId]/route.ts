@@ -6,6 +6,8 @@ import { publish } from "@/lib/events";
 const EditBody = z.object({
   body: z.string().min(1).max(20000).optional(),
   kind: z.enum(["comment", "remark", "feedback"]).optional(),
+  /** true = mark solved, false = clear the marker. */
+  solved: z.boolean().optional(),
 });
 
 export async function PATCH(
@@ -43,15 +45,33 @@ export async function PATCH(
     return fail(403, "forbidden", `The ${nextKind} field is read-only for your role.`);
   }
 
+  const bodyChanged = parsed.data.body !== undefined && parsed.data.body !== comment.body;
+  const kindChanged = nextKind !== comment.kind;
+  const solved = parsed.data.solved;
+  // Change request: editing a note drops its "solved" marker (it becomes open
+  // again and the Solve button reappears). An explicit `solved` wins.
+  const solvedAt = solved === undefined
+    ? (bodyChanged || kindChanged ? null : comment.solvedAt)
+    : (solved ? new Date() : null);
+  const solvedChanged = (solvedAt === null) !== (comment.solvedAt === null);
+
   const updated = await db.comment.update({
     where: { id: comment.id },
     data: {
       body: parsed.data.body ?? comment.body,
       kind: nextKind,
+      solvedAt,
     },
   });
   await db.activity.create({
-    data: { taskId, actorId: user.id, action: `task.${nextKind}_edited`, field: nextKind },
+    data: {
+      taskId,
+      actorId: user.id,
+      action: solvedChanged
+        ? `task.${nextKind}_${solvedAt ? "solved" : "reopened"}`
+        : `task.${nextKind}_edited`,
+      field: nextKind,
+    },
   });
   publish(id, "comment_edited", { taskId, id: comment.id });
   return ok({ comment: updated });

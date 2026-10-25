@@ -153,6 +153,41 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
     }
   }
 
+  /** Mark a comment/remark/feedback as solved ("(solved)" beside the text). */
+  async function solveNote(id: string) {
+    setErr("");
+    try {
+      await api(`/api/projects/${projectId}/tasks/${taskId}/comments/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ solved: true }),
+      });
+      await loadDetail();
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not mark note as solved.");
+    }
+  }
+
+  /**
+   * Editing clears the solved marker first, so the note goes back to open and
+   * the Solve button is offered again once the edit is done.
+   */
+  async function startEditNote(n: { id: string; text: string; solved: boolean }) {
+    setEditingNoteId(n.id);
+    setEditingNoteText(n.text);
+    if (!n.solved) return;
+    try {
+      await api(`/api/projects/${projectId}/tasks/${taskId}/comments/${n.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ solved: false }),
+      });
+      await loadDetail();
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not reopen note.");
+    }
+  }
+
   // Store row wins (live); detail fills in until the store has loaded.
   const t: Record<string, unknown> | null = (storeTask as Record<string, unknown> | undefined) ?? detail;
   const comments = (t?.comments as { id: string; kind: string; body: string; author: { name: string }; createdAt: string }[] | undefined) ?? [];
@@ -167,6 +202,19 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
     ? (lookups.issueTypes.find((x) => x.id === (t.typeId as string | null)) ??
        ((t.type as { id: string; name: string; color: string } | null) ?? null))
     : null;
+  // Epic is a read-only badge in the header (change request: epic moved out of
+  // Properties, where "Assigned by" now lives).
+  const epicInfo = t
+    ? ((t.epic as { id: string; name: string; color?: string | null } | null) ?? null)
+    : null;
+  // The shared store row (listTasks) carries no projectName; the lookups always
+  // do, and the project name is fixed text in the header (no dropdown).
+  const projectName = String(t?.projectName ?? lookups.project.name ?? "");
+  const assignedBy = t
+    ? ((t.assignedBy as { name: string; deletedAt: string | null } | null) ?? null)
+    : null;
+  const assignedByName = assignedBy ? `${assignedBy.name}${assignedBy.deletedAt ? " (removed)" : ""}` : "—";
+  const assignedAtLabel = t?.assignedAt ? new Date(String(t.assignedAt)).toLocaleString() : undefined;
 
   function sel(
     label: string, value: string | null, options: { id: string; name: string }[],
@@ -206,7 +254,7 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
         className="glass-strong flex h-full w-full max-w-lg flex-col shadow-2xl sm:rounded-l-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Fixed header: identifier + type + title + actions (never scrolls away). */}
+        {/* Fixed header: identifier + type + epic + title, project name beside Close (never scrolls away). */}
         <div className="flex shrink-0 items-start gap-2 border-b border-line p-3">
           <div className="min-w-0 flex-1">
             {t ? (
@@ -218,11 +266,12 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
                   >
                     {String(t.key)}
                   </span>
-                   {Boolean(t.projectName) && (
-                     <span className="text-muted" title={String(t.projectName)}>
-                       · {String(t.projectName)}
-                     </span>
-                   )}
+                  {epicInfo && (
+                    <span className="inline-flex min-w-0 items-center gap-1 rounded border border-line px-1.5 py-0.5 text-muted" title={`Epic: ${epicInfo.name}`}>
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: epicInfo.color ?? "currentColor" }} aria-hidden="true" />
+                      <span className="max-w-[10rem] truncate">{epicInfo.name}</span>
+                    </span>
+                  )}
                   {typeInfo && (
                     <span className="inline-flex min-w-0 items-center gap-1 rounded border border-line px-1.5 py-0.5 text-muted" title={`Issue type: ${typeInfo.name}`}>
                       <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: typeInfo.color }} aria-hidden="true" />
@@ -241,47 +290,38 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
                     className="tt-input mt-1.5 font-semibold"
                   />
                 ) : (
-                  <>
                   <h2 className="mt-1.5 break-words text-base font-semibold leading-snug">{String(t.title)}</h2>
-                 <label className="mt-1 flex items-center gap-2 text-[11px] text-muted">
-                   <input
-                     type="checkbox"
-                     checked={Boolean(t.assignedBy)}
-                     disabled={!(m.isSuperAdmin || m.perms.assign === true) || saving !== ""}
-                     onChange={(e) => void patch({ assignedByToggle: e.target.checked }, "assigned by")}
-                     aria-label="Assigned by"
-                   />
-                   <span>
-                     Assigned by:{" "}
-                     {(() => {
-                       const ab = t.assignedBy as { name: string; deletedAt: string | null } | null;
-                       return ab ? `${ab.name}${ab.deletedAt ? " (removed)" : ""}` : "—";
-                     })()}
-                     {t.assignedAt ? ` · ${new Date(String(t.assignedAt)).toLocaleString()}` : ""}
-                   </span>
-                 </label>
-                    </>
                 )}
               </>
             ) : (
               <span className="text-sm font-semibold">Task details</span>
             )}
           </div>
-          {t && (
-            <TaskMenu
-              projectId={projectId}
-              taskId={String(t.id)}
-              taskKey={String(t.key)}
-              title={String(t.title ?? "")}
-              canRename={canEditThis && rule("title") === "editable"}
-              canDelete={can("delete_task")}
-              onChanged={() => { loadDetail(); onChanged(); }}
-              onDeleted={() => { onChanged(); onClose(); }}
-            />
-          )}
-          <button onClick={onClose} className="tt-btn shrink-0" title="Close (Esc)" aria-label="Close task panel">
-            <IconX className="h-3.5 w-3.5" /> Close (Esc)
-          </button>
+          <div className="flex shrink-0 items-start gap-2">
+            {t && (
+              <TaskMenu
+                projectId={projectId}
+                taskId={String(t.id)}
+                taskKey={String(t.key)}
+                title={String(t.title ?? "")}
+                canRename={canEditThis && rule("title") === "editable"}
+                canDelete={can("delete_task")}
+                onChanged={() => { loadDetail(); onChanged(); }}
+                onDeleted={() => { onChanged(); onClose(); }}
+              />
+            )}
+            {t && Boolean(projectName) && (
+              <span
+                className="mt-1.5 max-w-[9rem] truncate text-[11px] text-muted"
+                title={projectName}
+              >
+                {projectName}
+              </span>
+            )}
+            <button onClick={onClose} className="tt-btn shrink-0" title="Close (Esc)" aria-label="Close task panel">
+              <IconX className="h-3.5 w-3.5" /> Close (Esc)
+            </button>
+          </div>
         </div>
 
         {!t ? (
@@ -309,9 +349,22 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
                 }, !can("change_status"))}
                 {sel("Priority", t.priorityId as string | null, lookups.priorities, (v) => v && patch({ priorityId: v }, "priority"), !(can("change_priority") || can("edit_task_own")))}
                 {sel("Issue Type", t.typeId as string | null, lookups.issueTypes, (v) => patch({ typeId: v }, "issue type"), rule("type") !== "editable")}
-                {sel("Assignee", t.assigneeId as string | null, lookups.members.map((x) => ({ id: x.userId, name: userOptionLabel(x) })), (v) => patch({ assigneeId: v }, "assignee"), !(can("assign") || can("edit_task_own")))}
+                {sel("Assignee", t.assigneeId as string | null, lookups.members.map((x) => ({ id: x.userId, name: userOptionLabel(x) })), (v) => patch({ assigneeId: v }, "assignee"), !can("assign"))}
                 {sel("Tested By", t.testedById as string | null, lookups.members.map((x) => ({ id: x.userId, name: userOptionLabel(x) })), (v) => patch({ testedById: v }, "tester"), rule("testedBy") !== "editable")}
-                {sel("Epic", t.epicId as string | null, lookups.epics, (v) => patch({ epicId: v }, "epic"), rule("epic") !== "editable")}
+                {rule("assignee") !== "hidden" && (
+                  <label className="block text-xs text-muted">Assigned by
+                    <span className={`${staticBox} gap-2`} title={assignedAtLabel}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(t.assignedBy)}
+                        disabled={!can("assign") || saving !== ""}
+                        onChange={(e) => void patch({ assignedByToggle: e.target.checked }, "assigned by")}
+                        aria-label="Set me as the assigned by"
+                      />
+                      <span className="min-w-0 flex-1 truncate">{assignedByName}</span>
+                    </span>
+                  </label>
+                )}
               </div>
             </section>
 
@@ -373,7 +426,7 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
               <h3 className={sectionTitle}>Comments / Remarks / Feedback</h3>
               {(() => {
                 const visibleComments = filterVisibleNotes(comments, m.fieldRules);
-                const notes = buildTaskNotes(visibleComments as { id: string; kind: string; body: string; createdAt: string; author: { name: string; deletedAt: string | null } | null }[]);
+                const notes = buildTaskNotes(visibleComments as { id: string; kind: string; body: string; createdAt: string; solvedAt?: string | null; author: { name: string; deletedAt: string | null } | null }[]);
                 if (notes.length === 0) return <p className="text-xs text-muted">No comments yet.</p>;
                 return (
                   <div className="max-h-48 space-y-2 overflow-y-auto">
@@ -384,10 +437,20 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
                           <strong>{n.n}.</strong> <strong>{n.author}{n.authorDeleted ? " (removed)" : ""}</strong>{" "}
                           <span className="text-muted">{new Date(n.createdAt).toLocaleString()}</span>
                           <span className="ml-auto flex gap-1">
+                            {!n.solved && (
+                              <button
+                                type="button"
+                                className="rounded border border-emerald-300 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:border-emerald-800 dark:text-emerald-300"
+                                onClick={() => void solveNote(n.id)}
+                                title="Mark this note as solved"
+                              >
+                                Solve
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="rounded border border-line px-1.5 py-0.5 text-[10px]"
-                              onClick={() => { setEditingNoteId(n.id); setEditingNoteText(n.text); }}
+                              onClick={() => void startEditNote(n)}
                             >
                               Edit
                             </button>
@@ -415,7 +478,12 @@ export default function TaskDrawer({ projectId, taskId, lookups, onClose, onChan
                             </div>
                           </div>
                         ) : (
-                          <div className="mt-0.5 whitespace-pre-wrap text-sm">{n.text}</div>
+                          <div className="mt-0.5 whitespace-pre-wrap text-sm">
+                            {n.text}
+                            {n.solved && (
+                              <span className="font-medium text-emerald-600 dark:text-emerald-400"> (solved)</span>
+                            )}
+                          </div>
                         )}
                       </div>
                     ))}

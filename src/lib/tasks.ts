@@ -504,11 +504,10 @@ export async function updateTask(client: PrismaClient, ctx: TaskContext, taskId:
       }
     }
     if (patchKey === "assigneeId" && v !== task.assigneeId) {
-      const claiming = task.assigneeId === null && v === userId;
-      const releasing = v === null && task.assigneeId === userId;
-      // Phase 2: reassignment outside a status change needs `assign` (Admin/PM);
-      // everyone else may only assign as part of the status-change "Assign to" step.
-      if (!canDo(membership.perms, "assign") && !(claiming || releasing) && !isAssignStep) {
+      // Change request: only roles explicitly granted `assign` may assign or
+      // reassign. The one exception is the status-change "Assign to" step, which
+      // bundles the pick with a move the role is already allowed to make.
+      if (!canDo(membership.perms, "assign") && !isAssignStep) {
         throw new Error("Role cannot assign/reassign tasks.");
       }
     }

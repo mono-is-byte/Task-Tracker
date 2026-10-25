@@ -542,6 +542,17 @@ describe("Phase 2: status-change 'Assign to' step", () => {
     await expect(updateTask(db, dev, t.id, { assigneeId: fx.users.dev2 })).rejects.toThrow(/assign/);
   });
 
+  it("developer cannot claim an unassigned task without `assign` (nobody assigns but `assign` roles)", async () => {
+    // The drawer/table only offer the assignee picker to roles with `assign`;
+    // the server enforces the same rule, so a bogus request is rejected too.
+    const { ctx: pm } = await membership("pm");
+    const { ctx: dev } = await membership("dev");
+    const t = await createTask(db, pm, { title: "cannot claim", statusId: fx.S.todo });
+    await expect(updateTask(db, dev, t.id, { assigneeId: fx.users.dev })).rejects.toThrow(/assign/);
+    const after = await db.task.findUniqueOrThrow({ where: { id: t.id } });
+    expect(after.assigneeId).toBeNull();
+  });
+
   it("Admin/PM may reassign at any time without a status change", async () => {
     const { ctx: pm } = await membership("pm");
     const t = await createTask(db, pm, { title: "pm reassign", assigneeId: fx.users.dev, statusId: fx.S.prog });

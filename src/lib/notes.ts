@@ -19,6 +19,8 @@ export interface NoteSource {
   kind: string;
   body: string;
   createdAt: string | Date;
+  /** Null/undefined = still open; a timestamp = solved. */
+  solvedAt?: string | Date | null;
   author?: { id?: string; name?: string; deletedAt?: string | Date | null } | null;
 }
 
@@ -28,6 +30,8 @@ export interface TaskNote {
   n: number;
   type: NoteKind;
   text: string;
+  /** True when the note was marked solved (rendered as " (solved)"). */
+  solved: boolean;
   author: string;
   authorDeleted: boolean;
   createdAt: string;
@@ -57,15 +61,21 @@ export function buildTaskNotes(comments: NoteSource[] | null | undefined): TaskN
       n: i + 1,
       type: c.kind as NoteKind,
       text: c.body,
+      solved: Boolean(c.solvedAt),
       author: c.author?.name ?? "Unknown",
       authorDeleted: Boolean(c.author?.deletedAt),
       createdAt: new Date(c.createdAt).toISOString(),
     }));
 }
 
-/** "1. text" / "2. text" lines for the export cell and tooltips. */
+/** Note text for display only (never for the edit textarea). */
+export function noteText(n: Pick<TaskNote, "text" | "solved">): string {
+  return n.solved ? `${n.text} (solved)` : n.text;
+}
+
+/** "1. text" / "2. text (solved)" lines for the export cell and tooltips. */
 export function notesAsLines(notes: TaskNote[]): string[] {
-  return notes.map((notee) => `${notee.n}. ${notee.text.replace(/\s*\n\s*/g, " ")}`);
+  return notes.map((notee) => `${notee.n}. ${noteText(notee).replace(/\s*\n\s*/g, " ")}`);
 }
 
 /** Visible notes after the role's field rules (hidden remarks/feedback vanish). */

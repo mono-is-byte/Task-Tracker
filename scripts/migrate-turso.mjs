@@ -12,6 +12,7 @@
 // The script only ever talks to the database in TURSO_DATABASE_URL — it never
 // touches the local dev database.
 
+import "dotenv/config";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { createClient } from "@libsql/client";

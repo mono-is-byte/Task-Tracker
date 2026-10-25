@@ -13,7 +13,7 @@ import AssignStepDialog from "@/components/AssignStepDialog";
 import Avatar from "@/components/Avatar";
 import { timerChipClass, timerSummary, fmtDur } from "@/lib/timerFormat";
 import { canTransition } from "@/lib/workflow";
-import { buildTaskNotes } from "@/lib/notes";
+import { buildTaskNotes, noteText } from "@/lib/notes";
 import { IconCalendar, IconClipboardCheck, IconPause, IconPlay, IconX } from "@/components/icons";
 
 type Card = TaskRow & {
@@ -219,7 +219,7 @@ export default function BoardPage() {
             <div className="mt-1 space-y-0.5 text-[10px] text-muted" title="Open the task to edit these notes">
               {shown.map((n) => (
                 <div key={n.id} className="truncate">
-                  <span className="font-medium">{n.n}.</span> {n.text}
+                  <span className="font-medium">{n.n}.</span> {noteText(n)}
                 </div>
               ))}
               {more > 0 && <div className="text-slate-400">+{more} more</div>}
