@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { api } from "@/lib/client";
 
 /**
@@ -133,7 +133,7 @@ function releaseLive(projectId: string) {
 }
 
 /** Optimistically merge a patch into one row (no network). */
-export function mergeTask(projectId: string, id: string, patch: Record<string, unknown>) {
+function mergeTask(projectId: string, id: string, patch: Record<string, unknown>) {
   const e = entryFor(projectId);
   e.state = {
     ...e.state,
@@ -143,7 +143,7 @@ export function mergeTask(projectId: string, id: string, patch: Record<string, u
 }
 
 /** Optimistically add / replace / remove rows. */
-export function upsertTask(projectId: string, task: TaskRow) {
+function upsertTask(projectId: string, task: TaskRow) {
   const e = entryFor(projectId);
   const exists = e.state.tasks.some((t) => t.id === task.id);
   e.state = {
@@ -157,10 +157,6 @@ export function removeTask(projectId: string, id: string) {
   const e = entryFor(projectId);
   e.state = { ...e.state, tasks: e.state.tasks.filter((t) => t.id !== id) };
   e.listeners.forEach((l) => l());
-}
-
-export function getTask(projectId: string, id: string): TaskRow | undefined {
-  return entryFor(projectId).state.tasks.find((t) => t.id === id);
 }
 
 /**
@@ -251,24 +247,4 @@ export function useTasks(projectId: string): TaskStoreState & { refresh: () => v
 export function useTaskRow(projectId: string, id: string | null): TaskRow | undefined {
   const { tasks } = useTasks(projectId);
   return id ? tasks.find((t) => t.id === id) : undefined;
-}
-
-/** Small helper so views can await a mutation and know when to refetch. */
-export function useTaskMutations(projectId: string) {
-  const ref = useRef(0);
-  ref.current += 1;
-  return {
-    patch: (id: string, patch: Record<string, unknown>) => patchTask(projectId, id, patch),
-    create: (body: Record<string, unknown>) => createTask(projectId, body),
-    remove: (id: string) => deleteTask(projectId, id),
-    timer: (id: string, action: "start" | "stop") => timerAction(projectId, id, action),
-    refresh: () => { void refreshTasks(projectId); },
-  };
-}
-
-/** Keep the store warm while the project layout is mounted. */
-export function useTaskStoreLifecycle(projectId: string) {
-  useEffect(() => {
-    void refreshTasks(projectId);
-  }, [projectId]);
 }

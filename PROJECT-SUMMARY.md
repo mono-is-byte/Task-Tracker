@@ -51,8 +51,8 @@ pre-16 memory for APIs, conventions and file structure.
 ```
 Task-Tracker/
 ├── prisma/
-│   ├── schema.prisma              # 29 models, provider = "sqlite"
-│   ├── migrations/                # 17 committed migrations (source of truth)
+│   ├── schema.prisma              # 27 models, provider = "sqlite"
+│   ├── migrations/                # 23 committed migrations (source of truth)
 │   └── seed.ts                    # demo data; DEMO_PASSWORD = "Demo1234!"
 ├── prisma.config.ts               # Prisma 7 config: schema path, migrations path, seed
 ├── scripts/

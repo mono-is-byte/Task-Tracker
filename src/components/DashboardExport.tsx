@@ -18,7 +18,7 @@ import type { DashboardSummary } from "@/lib/dashboard";
  *        worksheet per dashboard section.
  */
 
-export interface DashboardExportRow {
+interface DashboardExportRow {
   key: string;
   title: string;
   status: string;
@@ -26,7 +26,7 @@ export interface DashboardExportRow {
   due: string;
 }
 
-export interface DashboardExportActivity {
+interface DashboardExportActivity {
   key: string;
   title: string;
   action: string;

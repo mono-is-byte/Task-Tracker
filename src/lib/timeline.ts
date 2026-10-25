@@ -6,7 +6,7 @@
  * unit-testable (tests/timeline.test.ts).
  */
 
-export const DAY_MS = 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Inclusive day range as day keys. */
 export interface DayRange {
@@ -14,7 +14,7 @@ export interface DayRange {
   end: string;
 }
 
-export function isDayKey(v: unknown): v is string {
+function isDayKey(v: unknown): v is string {
   return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 }
 

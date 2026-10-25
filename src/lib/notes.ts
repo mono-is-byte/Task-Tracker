@@ -9,8 +9,8 @@
  * broken comment → remark → feedback, then by id so the order is stable.
  */
 
-export const NOTE_KINDS = ["comment", "remark", "feedback"] as const;
-export type NoteKind = (typeof NOTE_KINDS)[number];
+const NOTE_KINDS = ["comment", "remark", "feedback"] as const;
+type NoteKind = (typeof NOTE_KINDS)[number];
 
 const KIND_RANK: Record<NoteKind, number> = { comment: 0, remark: 1, feedback: 2 };
 

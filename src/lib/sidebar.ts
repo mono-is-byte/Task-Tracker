@@ -12,10 +12,10 @@
  * local state for its icon/aria attributes.
  */
 
-export const SIDEBAR_LS_KEY = "tt.sidebar";
+const SIDEBAR_LS_KEY = "tt.sidebar";
 
 /** Below lg (1024px) the sidebar is a drawer; at lg+ it is the icon rail. */
-export const SIDEBAR_MOBILE_MQ = "(max-width: 1023.98px)";
+const SIDEBAR_MOBILE_MQ = "(max-width: 1023.98px)";
 
 const EVENT = "tt:sidebar";
 
@@ -61,10 +61,4 @@ export function closeMobileSidebar() {
 /** Used by nested navigation actions that need full-width UI (e.g. New project). */
 export function expandSidebar() {
   if (getCollapsed()) setCollapsed(false);
-}
-
-/** Subscribe to any sidebar state change (toggle, other tab, resize is separate). */
-export function onSidebarChange(listener: () => void): () => void {
-  window.addEventListener(EVENT, listener);
-  return () => window.removeEventListener(EVENT, listener);
 }

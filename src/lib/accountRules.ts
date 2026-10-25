@@ -20,7 +20,7 @@ export function isGender(v: unknown): v is Gender {
 export const USERNAME_MIN = 3;
 export const USERNAME_MAX = 30;
 /** Letters, digits, dot, underscore, hyphen — no spaces. */
-export const USERNAME_RE = /^[A-Za-z0-9._-]+$/;
+const USERNAME_RE = /^[A-Za-z0-9._-]+$/;
 /** How many times a user may rename themselves per rolling 24h window. */
 export const USERNAME_CHANGE_DAILY_LIMIT = 5;
 
@@ -44,7 +44,7 @@ export function usernameProblems(value: string): string[] {
 }
 
 /** Fields the profile form may change (gender/username have their own routes). */
-export const PROFILE_FIELDS = ["name", "theme", "hoursPerDay", "avatarUrl", "gender"] as const;
+const PROFILE_FIELDS = ["name", "theme", "hoursPerDay", "avatarUrl", "gender"] as const;
 
 export type ProfileChange = {
   /** Only the fields that ACTUALLY differ — an empty object means "nothing to write". */

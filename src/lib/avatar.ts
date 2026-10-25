@@ -11,7 +11,7 @@ import { randomBytes } from "crypto";
  * is never trusted or reused.
  */
 export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
-export const AVATAR_URL_PREFIX = "/uploads/avatars/";
+const AVATAR_URL_PREFIX = "/uploads/avatars/";
 
 /** JPEG files start with the SOI marker FF D8 FF. */
 export function isJpegBuffer(buf: Buffer): boolean {

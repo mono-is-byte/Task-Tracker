@@ -32,8 +32,6 @@ export interface Failure {
   error: string;
 }
 
-export const OK = { ok: true } as const;
-
 /** Can this user open the dedicated Users page? Admin or PM-level (manage_members). */
 export async function canUseUsersPage(client: PrismaClient, actor: Actor): Promise<boolean> {
   if (actor.isSuperAdmin) return true;
@@ -63,7 +61,7 @@ export async function canEditTargetUser(
 }
 
 /** Active (non-deleted) super admins other than `excludeUserId`. */
-export async function otherActiveAdmins(client: PrismaClient, excludeUserId: string): Promise<number> {
+async function otherActiveAdmins(client: PrismaClient, excludeUserId: string): Promise<number> {
   return client.user.count({
     where: { isSuperAdmin: true, active: true, deletedAt: null, id: { not: excludeUserId } },
   });

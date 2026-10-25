@@ -1,24 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
 
-export interface ProjectMemberRow {
-  id: string;
-  userId: string;
-  name: string;
-  email: string;
-  username: string;
-  active: boolean;
-  /** Uploaded picture, shown in the members list (same avatar as Users). */
-  avatarUrl: string | null;
-  /**
-   * The user's designation: the NAME of the role their `User.designation`
-   * points at, resolved live (renames show up here immediately). Null when the
-   * user has no designation or their designated role was deleted.
-   */
-  designation: string | null;
-  roleIds: string[];
-  roleNames: string[];
-}
-
 /**
  * Members list for the project Members page: each member with their project
  * roles plus their current designation (displayed as an extra role chip).

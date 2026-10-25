@@ -27,7 +27,7 @@ export function taskSearchText(t: {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export function startOfDay(d: Date): Date {
+function startOfDay(d: Date): Date {
   const c = new Date(d);
   c.setHours(0, 0, 0, 0);
   return c;
@@ -128,8 +128,6 @@ export const TASK_CSV_COLUMNS = [
   "Git Branch",
   "Dependency",
 ] as const;
-
-export type CsvRow = Record<string, string>;
 
 const BANNER = "Tasks time may change depending on meeting, emergency support";
 

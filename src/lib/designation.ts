@@ -87,20 +87,6 @@ export async function syncUserDesignation(
 }
 
 /**
- * Set the primary designation explicitly (Users admin). The role must exist;
- * unknown ids are rejected by the caller (`resolveDesignationRole`). Returns the
- * new designation (null when cleared).
- */
-export async function setUserDesignation(
-  client: PrismaClient,
-  userId: string,
-  roleId: string | null,
-): Promise<string | null> {
-  await client.user.update({ where: { id: userId }, data: { designation: roleId } });
-  return roleId;
-}
-
-/**
  * One-time repair across every user: any designation that is no longer among
  * the user's held roles is replaced by their first held role. Users with no
  * project memberships are left untouched. Returns how many rows changed.

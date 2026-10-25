@@ -52,7 +52,7 @@ export function clientIp(req: Request): string {
 }
 
 /** CSRF: for cookie-authenticated mutations, require same-origin Origin/Referer when present. */
-export function checkSameOrigin(req: Request): boolean {
+function checkSameOrigin(req: Request): boolean {
   if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return true;
   const origin = req.headers.get("origin");
   const referer = req.headers.get("referer");

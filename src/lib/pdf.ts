@@ -24,7 +24,7 @@ export function ctx(doc: jsPDF, margin = 14): PdfCtx {
   return { doc, y: margin, margin };
 }
 
-export function pageWidth(c: PdfCtx): number {
+function pageWidth(c: PdfCtx): number {
   return c.doc.internal.pageSize.getWidth() - c.margin * 2;
 }
 
@@ -54,7 +54,7 @@ function setTextColor(c: PdfCtx, hex?: string): void {
 }
 
 /** One text line with automatic page break. Returns the y after drawing. */
-export function text(
+function text(
   c: PdfCtx,
   str: string,
   opts: { size?: number; bold?: boolean; color?: string; gap?: number; x?: number; width?: number } = {},
@@ -75,7 +75,7 @@ export function text(
 }
 
 /** Section header with a rule under it. */
-export function section(c: PdfCtx, title: string): void {
+function section(c: PdfCtx, title: string): void {
   ensure(c, 12);
   c.y += 3;
   text(c, title, { size: 11, bold: true });
@@ -85,7 +85,7 @@ export function section(c: PdfCtx, title: string): void {
 }
 
 /** Horizontal bar row: label | colored bar | value. */
-export function barRow(
+function barRow(
   c: PdfCtx,
   label: string,
   value: number,
@@ -117,7 +117,7 @@ export function barRow(
 }
 
 /** Simple bordered table with its own page breaks (header repeats per page). */
-export function table(
+function table(
   c: PdfCtx,
   cols: { header: string; w: number; align?: "left" | "right" }[],
   rows: string[][],
@@ -165,7 +165,7 @@ export function table(
 }
 
 /** Footer on every page: label on the left, "Page i / n" on the right. */
-export function footer(c: PdfCtx, label: string): void {
+function footer(c: PdfCtx, label: string): void {
   const pages = c.doc.getNumberOfPages();
   const y = c.doc.internal.pageSize.getHeight() - c.margin / 2;
   for (let i = 1; i <= pages; i++) {

@@ -24,7 +24,7 @@ export * from "./timerState";
  */
 
 /** Who may Start/Stop: the task's assignee, any PM (manage_workflow) or Admin. */
-export function canOperateTimer(task: { assigneeId: string | null }, ctx: TaskContext): boolean {
+function canOperateTimer(task: { assigneeId: string | null }, ctx: TaskContext): boolean {
   if (task.assigneeId && task.assigneeId === ctx.userId) return true;
   return (
     ctx.membership.isSuperAdmin ||
@@ -90,7 +90,7 @@ export async function stopTimer(client: PrismaClient, ctx: TaskContext, taskId: 
 }
 
 /** Close the open stage segment (if any) and fold its seconds into totalSeconds. */
-export async function closeOpenStage(
+async function closeOpenStage(
   client: PrismaClient | Prisma.TransactionClient,
   taskId: string,
   now: Date,

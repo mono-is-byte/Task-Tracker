@@ -181,7 +181,7 @@ async function fullTaskRow(client: PrismaClient, ctx: TaskContext, taskId: strin
 
 /** Manager level for timer scheduling (Admin/PM). NOTE: this is NOT the
  *  workflow bypass — see `canBypassTransitions` in permissions.ts. */
-export function managerLevel(m: Membership): boolean {
+function managerLevel(m: Membership): boolean {
   return m.isSuperAdmin || canDo(m.perms, "manage_workflow") || canDo(m.perms, "manage_archive");
 }
 

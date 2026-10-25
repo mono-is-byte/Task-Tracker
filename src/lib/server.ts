@@ -3,12 +3,10 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 import type { User } from "@prisma/client";
 import { COOKIE_NAME, getSessionUser } from "./auth";
-import { db, taskKey } from "./db";
+import { db } from "./db";
 import { getMembership, safeArr, type Membership } from "./permissions";
 import { listAssignableUsers, type DirectoryUser } from "./userDirectory";
 import type { TransitionRule } from "./workflow";
-
-export { taskKey };
 
 /**
  * Per-request memoisation: the app layout and the page it wraps both ask for
@@ -16,7 +14,7 @@ export { taskKey };
  * write). `cache()` makes that ONE lookup per navigation instead of two — which
  * matters a lot when the database is remote (serverless/Turso).
  */
-export const getViewer = cache(async (): Promise<{ user: User; sessionId: string } | null> => {
+const getViewer = cache(async (): Promise<{ user: User; sessionId: string } | null> => {
   const jar = await cookies();
   const token = jar.get(COOKIE_NAME)?.value;
   const su = await getSessionUser(db, token);

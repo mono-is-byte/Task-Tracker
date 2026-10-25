@@ -67,7 +67,7 @@ export interface CalendarTask {
   timerState: string;
 }
 
-export interface CalendarHoliday {
+interface CalendarHoliday {
   id: string;
   /** First day of the holiday, YYYY-MM-DD. */
   date: string;
@@ -79,7 +79,7 @@ export interface CalendarHoliday {
 }
 
 /** A working-day exception ("Office Open") — see lib/holidayDates precedence. */
-export interface CalendarException {
+interface CalendarException {
   id: string;
   date: string;
   note: string;

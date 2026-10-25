@@ -20,7 +20,3 @@ export function fmtDate(d: string | null | undefined): string {
   if (!d) return "";
   return new Date(d).toISOString().slice(0, 10);
 }
-
-export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}

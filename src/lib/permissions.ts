@@ -56,7 +56,7 @@ export const TASK_FIELDS = [
   "feedback",
 ] as const;
 
-export type TaskField = (typeof TASK_FIELDS)[number];
+type TaskField = (typeof TASK_FIELDS)[number];
 
 export interface RoleDef {
   description: string;

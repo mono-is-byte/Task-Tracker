@@ -30,7 +30,7 @@ export interface TimerFields {
   dueAt?: Date | null;
 }
 
-export function asDate(v: unknown): Date | null {
+function asDate(v: unknown): Date | null {
   if (!v) return null;
   return v instanceof Date ? v : new Date(v as string);
 }

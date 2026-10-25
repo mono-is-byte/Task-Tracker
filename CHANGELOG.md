@@ -135,6 +135,12 @@ Release sections will be added here as versions are tagged.
 
 ### Removed
 
+- **Dead code and one-off scripts**: removed unused components/helpers/re-exports
+  (`IconSearch`, `todayISO`, `setUserDesignation`, `holidayOverlapsRange`,
+  `onSidebarChange`, `getTask`, `useTaskMutations`, `useTaskStoreLifecycle`, plus
+  unreferenced types/constants and stale auth/server re-exports) and the undocumented
+  `check-contrast.mjs` / `merge-local-to-turso.mjs` scripts. Documented CLI scripts are
+  unchanged; type-check, the 252-test suite and the production build stay green.
 - **Sprints** completely: the `Sprint` table plus `Story.sprintId` and `Task.sprintId`
   (migration `20261024182738_drop_legacy_sprint_model`), the unused
   `getAllowedTransitions()` helper, and the never-read `SESSION_SECRET` env var (removed

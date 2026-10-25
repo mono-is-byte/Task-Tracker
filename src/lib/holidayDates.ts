@@ -16,7 +16,6 @@ import { dayKey, isWeekendDay } from "./calendar";
  */
 
 export const HOLIDAY_TYPES = ["public", "festival", "office", "other"] as const;
-export type HolidayType = (typeof HOLIDAY_TYPES)[number];
 
 export const HOLIDAY_TYPE_LABEL: Record<string, string> = {
   public: "Public holiday",
@@ -43,7 +42,7 @@ export interface ExceptionRow {
   note: string;
 }
 
-export const HOLIDAY_MAX_DAYS = 366;
+const HOLIDAY_MAX_DAYS = 366;
 
 /** Malformed keys return null; otherwise local midnight of that day. */
 export function parseDayKey(v: string | null | undefined): Date | null {
@@ -81,21 +80,12 @@ export function holidayCoversDay(h: Pick<HolidaySpan, "startDate" | "endDate">, 
   return day >= h.startDate && day <= end;
 }
 
-/** Does a holiday span touch [from..to] (inclusive)? */
-export function holidayOverlapsRange(
-  h: Pick<HolidaySpan, "startDate" | "endDate">,
-  from: string,
-  to: string,
-): boolean {
-  return h.startDate <= to && (h.endDate || h.startDate) >= from;
-}
-
 /** Normalised name used for duplicate detection (case/whitespace-insensitive). */
 export function normalizeHolidayName(name: string): string {
   return name.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-export type DayKind = "working" | "weekly_holiday" | "holiday" | "exception";
+type DayKind = "working" | "weekly_holiday" | "holiday" | "exception";
 
 export interface DayInfo {
   day: string;

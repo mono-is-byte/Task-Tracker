@@ -1,21 +1,18 @@
 import { createHash, randomBytes } from "crypto";
 import type { PrismaClient, User } from "@prisma/client";
-import { db } from "./db";
 import { generateTempPassword, hashPassword, passwordProblems, verifyPassword } from "./password";
-import { GENDERS, USERNAME_CHANGE_DAILY_LIMIT, isGender, usernameProblems } from "./accountRules";
-import { audit, AUDIT_RETENTION, pruneAuditLog } from "./audit";
-
-export { GENDERS, isGender, usernameProblems };
+import { USERNAME_CHANGE_DAILY_LIMIT, usernameProblems } from "./accountRules";
+import { audit } from "./audit";
 
 export const COOKIE_NAME = "tt_session";
-export const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12h
-export const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12h
+const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d
 export const IDLE_TTL_MS = 2 * 60 * 60 * 1000; // 2h idle
-export const LOCKOUT_THRESHOLD = 5;
-export const LOCKOUT_WINDOW_MIN = 15;
-export const LOCKOUT_MINUTES = 15;
+const LOCKOUT_THRESHOLD = 5;
+const LOCKOUT_WINDOW_MIN = 15;
+const LOCKOUT_MINUTES = 15;
 /** PHASE 6a: login attempts older than this are housekeeping and get pruned. */
-export const LOGIN_ATTEMPT_TTL_MS = 24 * 60 * 60 * 1000;
+const LOGIN_ATTEMPT_TTL_MS = 24 * 60 * 60 * 1000;
 
 export type Db = PrismaClient;
 
@@ -44,7 +41,7 @@ export function sha256(input: string): string {
  * prunes the table back to the newest 25 rows. Re-exported here so every
  * existing `@/lib/auth` import keeps working unchanged.
  */
-export { AUDIT_RETENTION, audit, pruneAuditLog };
+export { audit };
 
 export function sessionCookieHeader(token: string, opts: { rememberMe: boolean; secure: boolean }): string {
   const maxAge = Math.floor((opts.rememberMe ? REMEMBER_TTL_MS : SESSION_TTL_MS) / 1000);
@@ -436,5 +433,3 @@ export async function createUser(
   await audit(client, { actorId: adminId, action: "user.create", entity: "user", entityId: user.id, ip });
   return { user, tempPassword: temp };
 }
-
-export { db };

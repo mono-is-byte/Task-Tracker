@@ -8,8 +8,8 @@
 export type LookupKind = "priority" | "issuetype";
 
 export const LOOKUP_NAME_MAX = 40;
-export const PRIORITY_LEVEL_MIN = 0;
-export const PRIORITY_LEVEL_MAX = 99;
+const PRIORITY_LEVEL_MIN = 0;
+const PRIORITY_LEVEL_MAX = 99;
 export const PRIORITY_LEVEL_DEFAULT = 3;
 export const PRIORITY_COLOR_DEFAULT = "#94a3b8";
 export const ISSUETYPE_COLOR_DEFAULT = "#6366f1";

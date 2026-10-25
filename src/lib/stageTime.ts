@@ -13,11 +13,11 @@
  */
 
 /** Canonical status names used by the preset workflow. */
-export const DEVELOPMENT_STAGE_NAME = "In Progress";
-export const TESTING_STAGE_NAME = "In Testing";
+const DEVELOPMENT_STAGE_NAME = "In Progress";
+const TESTING_STAGE_NAME = "In Testing";
 /** Development Done carries the In Progress total forward — it adds no time. */
-export const DEVELOPMENT_DONE_STAGE_NAME = "Development Done";
-export const DONE_STAGE_NAME = "Done";
+const DEVELOPMENT_DONE_STAGE_NAME = "Development Done";
+const DONE_STAGE_NAME = "Done";
 
 /** One TaskStageTime row (only the parts the summary needs). */
 export interface StageTimeSegment {

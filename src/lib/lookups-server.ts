@@ -27,7 +27,7 @@ import {
  * pointing at a deleted row.
  */
 
-export type LookupFailureCode = "invalid" | "duplicate" | "not_found" | "in_use" | "last_priority";
+type LookupFailureCode = "invalid" | "duplicate" | "not_found" | "in_use" | "last_priority";
 
 export interface LookupFailure {
   ok: false;

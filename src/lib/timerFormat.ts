@@ -63,7 +63,7 @@ export interface TimerRow {
  * when the timer is running and the row carries the raw columns, recompute it
  * against `now` so the display ticks live on the client.
  */
-export function liveWorkedMs(t: TimerRow, now?: Date): number | null {
+function liveWorkedMs(t: TimerRow, now?: Date): number | null {
   if (now && (t.timerState === "running" || t.timerState === "overdue") && t.stageEnteredAt && t.totalSeconds != null) {
     const entered = new Date(t.stageEnteredAt).getTime();
     if (Number.isFinite(entered)) return Math.max(0, t.totalSeconds) * 1000 + Math.max(0, now.getTime() - entered);
