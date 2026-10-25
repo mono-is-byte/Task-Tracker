@@ -15,6 +15,9 @@
 /** Canonical status names used by the preset workflow. */
 export const DEVELOPMENT_STAGE_NAME = "In Progress";
 export const TESTING_STAGE_NAME = "In Testing";
+/** Development Done carries the In Progress total forward — it adds no time. */
+export const DEVELOPMENT_DONE_STAGE_NAME = "Development Done";
+export const DONE_STAGE_NAME = "Done";
 
 /** One TaskStageTime row (only the parts the summary needs). */
 export interface StageTimeSegment {
@@ -37,6 +40,8 @@ function stageKey(name: string | null | undefined): string {
 
 const DEV_KEY = stageKey(DEVELOPMENT_STAGE_NAME);
 const TEST_KEY = stageKey(TESTING_STAGE_NAME);
+const DEV_DONE_KEY = stageKey(DEVELOPMENT_DONE_STAGE_NAME);
+const DONE_KEY = stageKey(DONE_STAGE_NAME);
 
 /**
  * Closed segments only. The open segment is intentionally left to
@@ -87,4 +92,34 @@ export function liveStageTimes(t: StageTimeRow, now?: Date): StageTimeTotals {
     }
   }
   return { developmentMs, testingMs, totalMs: developmentMs + testingMs };
+}
+
+/** Which totals a board card shows while the task sits in a given stage. */
+export interface BoardTimeFields {
+  development: boolean;
+  testing: boolean;
+  total: boolean;
+}
+
+/**
+ * Board columns mirror the workflow:
+ *   - In Progress / Development Done → development time only (the time collected
+ *     in In Progress; Development Done itself adds none),
+ *   - In Testing / Done → development + testing + total,
+ *   - any other status → all three when the task already has history (re-opened
+ *     work keeps its numbers), otherwise none.
+ */
+export function boardTimeFields(
+  statusName: string | null | undefined,
+  totals: StageTimeTotals,
+): BoardTimeFields {
+  const key = stageKey(statusName);
+  if (key === DEV_KEY || key === DEV_DONE_KEY) {
+    return { development: true, testing: false, total: false };
+  }
+  if (key === TEST_KEY || key === DONE_KEY) {
+    return { development: true, testing: true, total: true };
+  }
+  const history = totals.totalMs > 0;
+  return { development: history, testing: history, total: history };
 }

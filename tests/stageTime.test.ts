@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { liveStageTimes, summarizeStageTimes } from "../src/lib/stageTime";
+import { boardTimeFields, liveStageTimes, summarizeStageTimes } from "../src/lib/stageTime";
 
 /** One closed TaskStageTime row (leftAt defaults to a finished segment). */
 const seg = (
@@ -70,5 +70,60 @@ describe("stage time summary (Development / Testing / Total)", () => {
         status: { name: "In Progress" },
       }),
     ).toEqual({ developmentMs: 1000, testingMs: 2000, totalMs: 3000 });
+  });
+});
+
+describe("board card time fields per stage", () => {
+  const totals = (developmentMs: number, testingMs: number) => ({
+    developmentMs,
+    testingMs,
+    totalMs: developmentMs + testingMs,
+  });
+
+  it("shows development time only while in In Progress / Development Done", () => {
+    expect(boardTimeFields("In Progress", totals(0, 0))).toEqual({
+      development: true,
+      testing: false,
+      total: false,
+    });
+    expect(boardTimeFields("Development Done", totals(60_000, 120_000))).toEqual({
+      development: true,
+      testing: false,
+      total: false,
+    });
+  });
+
+  it("shows development, testing and total from In Testing onwards", () => {
+    expect(boardTimeFields("In Testing", totals(60_000, 0))).toEqual({
+      development: true,
+      testing: true,
+      total: true,
+    });
+    expect(boardTimeFields("Done", totals(60_000, 120_000))).toEqual({
+      development: true,
+      testing: true,
+      total: true,
+    });
+  });
+
+  it("keeps history visible in other statuses only when the task has time", () => {
+    expect(boardTimeFields("To Do", totals(0, 0))).toEqual({
+      development: false,
+      testing: false,
+      total: false,
+    });
+    expect(boardTimeFields("Re-open", totals(60_000, 120_000))).toEqual({
+      development: true,
+      testing: true,
+      total: true,
+    });
+  });
+
+  it("ignores case and extra spaces in the status name", () => {
+    expect(boardTimeFields("  in   progress ", totals(0, 0))).toEqual({
+      development: true,
+      testing: false,
+      total: false,
+    });
   });
 });

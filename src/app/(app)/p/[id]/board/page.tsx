@@ -12,7 +12,7 @@ import TaskMenu from "@/components/TaskMenu";
 import AssignStepDialog from "@/components/AssignStepDialog";
 import Avatar from "@/components/Avatar";
 import { fmtDur } from "@/lib/timerFormat";
-import { liveStageTimes } from "@/lib/stageTime";
+import { boardTimeFields, liveStageTimes } from "@/lib/stageTime";
 import { canTransition } from "@/lib/workflow";
 import { buildTaskNotes, noteText } from "@/lib/notes";
 import { IconCalendar, IconClipboardCheck, IconPause, IconPlay, IconX } from "@/components/icons";
@@ -244,20 +244,27 @@ export default function BoardPage() {
         </div>
         {(() => {
           const live = liveStageTimes(c, now);
-          const showTimes = live.totalMs > 0 || showStart || showStop;
-          if (!showTimes) return null;
+          const fields = boardTimeFields(c.status.name, live);
+          const showTimes = fields.development || fields.testing || fields.total;
+          if (!showTimes && !showStart && !showStop) return null;
           const timeText = (ms: number) => (ms > 0 ? fmtDur(ms) : "—");
           return (
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted">
-              <span title="Development time — tracked in the In Progress stage">
-                Dev <span className="font-semibold tabular-nums text-slate-600 dark:text-slate-300">{timeText(live.developmentMs)}</span>
-              </span>
-              <span title="Testing time — tracked in the In Testing stage">
-                Test <span className="font-semibold tabular-nums text-slate-600 dark:text-slate-300">{timeText(live.testingMs)}</span>
-              </span>
-              <span title="Total time — development + testing">
-                Total <span className="font-semibold tabular-nums text-slate-600 dark:text-slate-300">{timeText(live.totalMs)}</span>
-              </span>
+              {fields.development && (
+                <span title="Development time — tracked in the In Progress stage">
+                  Dev <span className="font-semibold tabular-nums text-slate-600 dark:text-slate-300">{timeText(live.developmentMs)}</span>
+                </span>
+              )}
+              {fields.testing && (
+                <span title="Testing time — tracked in the In Testing stage">
+                  Test <span className="font-semibold tabular-nums text-slate-600 dark:text-slate-300">{timeText(live.testingMs)}</span>
+                </span>
+              )}
+              {fields.total && (
+                <span title="Total time — development + testing">
+                  Total <span className="font-semibold tabular-nums text-slate-600 dark:text-slate-300">{timeText(live.totalMs)}</span>
+                </span>
+              )}
               {showStart && (
                 <button
                   onClick={(e) => { e.stopPropagation(); void timerCardAction(c, "start"); }}
