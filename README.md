@@ -51,17 +51,17 @@ per-project roles, field-level permissions, custom workflows and automation.
 ## Overview
 
 TaskTracker is a single-tenant project and issue tracker intended to be run by a team on
-its own infrastructure. It keeps the workflows teams actually need — configurable
-statuses, per-project roles, field-level permissions, time tracking and reporting — without
+its own infrastructure. It keeps the workflows teams actually need - configurable
+statuses, per-project roles, field-level permissions, time tracking and reporting - without
 the weight of an enterprise suite.
 
 The app is built on **Next.js 16 (App Router) + Prisma 7 + SQLite (via `better-sqlite3`)**,
 so a fresh clone runs with **zero external services**: no database server, no Docker, no
 cloud account. The Prisma schema uses only portable types, so a PostgreSQL move is
-mainly a datasource-provider change — note the committed migrations are SQLite SQL and
+mainly a datasource-provider change - note the committed migrations are SQLite SQL and
 would be regenerated for the new database.
 
-> **Status:** actively developed — 197 automated tests, full server-side permission
+> **Status:** actively developed - 197 automated tests, full server-side permission
 > enforcement, and light/dark theming.
 
 ---
@@ -73,7 +73,7 @@ would be regenerated for the new database.
 - **Table view** with inline editing, resizable columns, filters and a task drawer; row
   deletion goes through a confirmation dialog, and the hidden-column + width layout is
   remembered on the device per project (survives reloads).
-- **One task store per project** — the Board, Table, Timeline and drawer read and write the
+- **One task store per project** - the Board, Table, Timeline and drawer read and write the
   same rows (optimistic updates, rollback on failure, SSE refresh), so a change in one view
   appears in the others immediately and no duplicate tasks are created.
 - **Task drawer** for comments, activity history, links (`blocks` / `relates`), labels,
@@ -83,7 +83,7 @@ would be regenerated for the new database.
   “In Progress” (development) and “In Testing” (testing) rolls up into live
   Development / Testing / Total columns on the table and board.
 - **Epics, stories** and structured task types (Task / Story / Bug / Epic / Sub-task).
-- **Priorities & issue types** are managed per project in Settings — create, edit
+- **Priorities & issue types** are managed per project in Settings - create, edit
   (name / level / colour) and delete with duplicate checks; deleting an option that tasks
   still use asks for a replacement and moves those tasks over, so nothing is left pointing
   at a removed option.
@@ -91,28 +91,28 @@ would be regenerated for the new database.
 ### 📊 Views & reporting
 - **Dashboard** with KPI cards (Total / Completed / In progress / Pending / Overdue), a
   completion progress bar, tasks-by-status / priority / member bars, "assigned to me", the
-  QA queue, overdue work and a recent-activity feed — all computed from the saved tasks,
+  QA queue, overdue work and a recent-activity feed - all computed from the saved tasks,
   with the whole page exportable to PDF and Excel.
 - **Timeline** covering the whole project: a Day / Week / Month zoom plus a **Fit entire project**
   button, a header axis with a today marker, task, timer, start/due dates, estimates and logged
-  time in one frozen grid — bars are positioned from each task's start → due date (falling back
+  time in one frozen grid - bars are positioned from each task's start → due date (falling back
   to timer instants), the project range strip shows the configured project dates or the earliest
   start / latest due date, and tasks without dates are still listed instead of breaking the chart.
 - **Workload** against per-project and per-user working hours, honouring holidays and
   working-day exceptions.
 - **Calendar** (month/week) with a My/All toggle, project and assignee filters, a colour
-  legend and PDF export — Friday/Saturday weekly holidays use a light `#fff2f2` tint,
+  legend and PDF export - Friday/Saturday weekly holidays use a light `#fff2f2` tint,
   configured holidays a stronger red, and working-day exceptions light yellow.
 - **Holiday management** in Calendar Settings: a single-line add row (name, start, end, type)
   and read-only rows with an **Edit** button that swaps in date/name/type inputs plus Save/Cancel,
   so saved holidays can be updated without an always-visible edit form; duplicates and reversed
   ranges are rejected. "Working-day exception" toggles open the office on a holiday without
   deleting it. (A holiday `description` that was saved earlier stays stored and still shows in
-  the calendar tooltip — it is simply no longer edited here.)
-- **Reports**: status distribution, open tasks per assignee, a standalone **QA Queue — In
+  the calendar tooltip - it is simply no longer edited here.)
+- **Reports**: status distribution, open tasks per assignee, a standalone **QA Queue - In
   Testing per Tester** section (own heading and container, grouped by tester with counts, fed by
   the shared task store so status/tester changes appear without a reload), estimate vs actual,
-  and overdue — exportable to PDF.
+  and overdue - exportable to PDF.
 - **Archive** is a filtered view of Done tasks, not a separate store.
 
 ### 🔐 Workflow, roles & permissions
@@ -121,14 +121,14 @@ would be regenerated for the new database.
   actions, inline role editing and duplicate/same-status guards (empty roles = every role;
   Admin/PM may always move to any status).
 - **Forward-only** status moves with a manager bypass, enforced on the server.
-- **Multi-role membership** — a user can hold several roles in one project; effective
+- **Multi-role membership** - a user can hold several roles in one project; effective
   permissions are the union of them.
 - **Role × action matrix** and **field-level rules** (`hidden` / `readonly` / `editable`)
   editable by admins; system roles cannot be deleted but are fully editable.
 - **Server-side enforcement** on every endpoint (401/403 + a friendly no-access page);
   the UI only hides or disables.
 - **Automation rules** driven from Settings (e.g. stamp dates on status change, notify a
-  tester or assignee, clear the end date on re-open) — the rules card sits directly below
+  tester or assignee, clear the end date on re-open) - the rules card sits directly below
   Priorities & issue types, and every Settings card shares one heading/helper/spacing pattern
   that stacks cleanly on narrow screens.
 
@@ -154,7 +154,7 @@ would be regenerated for the new database.
 - **Cookie-session auth** with login rate limiting and lockout, absolute/idle expiry,
   remember-me, forced password change on first login, and a self-service **Active
   Sessions** list on the Profile page: the real browser/OS is parsed from the user agent
-  (missing parts are labelled unknown — nothing is invented), status and last activity are
+  (missing parts are labelled unknown - nothing is invented), status and last activity are
   derived from the server timestamps with relative times, the list has its own scroll
   container, and a single session or every other session can be revoked after a
   confirmation.
@@ -164,14 +164,14 @@ would be regenerated for the new database.
 - **Self-service email change** from the Profile page: the current password re-authenticates the
   change, the address is normalised to lower case and checked against every other account's
   email **and** username, the same user row (id, projects, tasks, sessions) is kept and the
-  change is audited. Sign-in with the new address works immediately — this deployment has no
+  change is audited. Sign-in with the new address works immediately - this deployment has no
   mail provider, so there is no confirmation link step.
 - **Password resets** are admin-triggered by default; with `SMTP_URL` set, a one-hour reset
   token is issued and written to the server log for the operator to deliver (no mailer is
   bundled).
 - **Security headers** (`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`,
   `Permissions-Policy`) set in `next.config.ts`.
-- No public sign-up — accounts are created by administrators by design.
+- No public sign-up - accounts are created by administrators by design.
 
 ### 📥 Import / export & localization
 - **Excel (.xlsx) export** and **CSV / Excel import** using the exact spreadsheet column names.
@@ -253,7 +253,7 @@ Task-Tracker/
 
 - **Node.js ≥ 20.9** (required by Next.js 16)
 - **npm** (bundled with Node.js)
-- No database server needed — SQLite is used for local development
+- No database server needed - SQLite is used for local development
 
 ### 1. Clone & install
 
@@ -279,7 +279,7 @@ cp .env.example .env
 
 Then open `.env` and set at least:
 
-- `DATABASE_URL` — `file:./dev.db` works out of the box.
+- `DATABASE_URL` - `file:./dev.db` works out of the box.
 
 > 🔒 Never commit `.env`. It is already listed in `.gitignore`; only `.env.example`
 > is tracked. See [Environment Variables](#environment-variables) for the full list.
@@ -330,13 +330,13 @@ accounts for local development only:
 | Variable | Required | Purpose |
 |---|---|---|
 | `DATABASE_URL` | ✅ (local) | `file:./dev.db` for the local SQLite file; the Prisma CLI also reads this for `migrate`/`seed`. |
-| `TURSO_DATABASE_URL` | — | Remote libSQL/Turso URL (`libsql://…`). When set, the running app uses it instead of the local file — required on serverless hosts such as Vercel. |
-| `TURSO_AUTH_TOKEN` | — | Turso database token (`turso db tokens create <db>`); required whenever `TURSO_DATABASE_URL` is remote. |
-| `APP_URL` | — | Base URL of the app; cookies are marked `Secure` when it starts with `https://` (and always in production) |
-| `SMTP_URL` | — | If set, forgot-password issues a one-hour reset token and writes it to the server log for an operator to deliver; if unset, users are told to ask an admin |
-| `SMTP_FROM` | — | From address intended for mail delivery — not read by the current build, which logs reset tokens instead of sending mail |
+| `TURSO_DATABASE_URL` | - | Remote libSQL/Turso URL (`libsql://…`). When set, the running app uses it instead of the local file - required on serverless hosts such as Vercel. |
+| `TURSO_AUTH_TOKEN` | - | Turso database token (`turso db tokens create <db>`); required whenever `TURSO_DATABASE_URL` is remote. |
+| `APP_URL` | - | Base URL of the app; cookies are marked `Secure` when it starts with `https://` (and always in production) |
+| `SMTP_URL` | - | If set, forgot-password issues a one-hour reset token and writes it to the server log for an operator to deliver; if unset, users are told to ask an admin |
+| `SMTP_FROM` | - | From address intended for mail delivery - not read by the current build, which logs reset tokens instead of sending mail |
 
-Copy `.env.example` to `.env` and fill in your own values — the template contains
+Copy `.env.example` to `.env` and fill in your own values - the template contains
 placeholders only.
 
 ---
@@ -353,12 +353,12 @@ npm start
 - `npm start` reads `.env` and serves on **http://localhost:3000** by default.
 - Set `PORT` to serve on a different port.
 - Any host with a **persistent disk** (VPS, Docker, Railway/Render/Fly with a volume) can
-  run this exactly as-is — the database is the `dev.db` file.
+  run this exactly as-is - the database is the `dev.db` file.
 
 ### Vercel (SQLite via Turso)
 
 Vercel's filesystem is **read-only** and per-invocation, so a SQLite *file* cannot live
-there. The app therefore supports a remote **libSQL/Turso** database — same SQLite dialect,
+there. The app therefore supports a remote **libSQL/Turso** database - same SQLite dialect,
 same migrations, same tests:
 
 1. Create a database at [turso.tech](https://turso.tech) and copy its URL + token:
@@ -377,18 +377,18 @@ same migrations, same tests:
    TURSO_DATABASE_URL="libsql://<db>-<org>.turso.io" \
    TURSO_AUTH_TOKEN="<token>" npm run seed -- --reset
    ```
-   (This writes to the remote database only — the local `dev.db` is untouched.)
+   (This writes to the remote database only - the local `dev.db` is untouched.)
    To skip the demo team and create only a fixed super-admin account instead, use
    `npm run admin:create` with the same environment variables (it prints the
    credentials it sets).
-   To copy your **existing local data** up to Turso instead — the remote database
-   then matches your `dev.db` exactly — run `npm run turso:copy-local` with the
+   To copy your **existing local data** up to Turso instead - the remote database
+   then matches your `dev.db` exactly - run `npm run turso:copy-local` with the
    same environment variables.
 4. In **Vercel → Project → Settings → Environment Variables** add:
    `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` and `APP_URL` (your `https://…` URL).
    Do **not** set `DATABASE_URL` to a file path on Vercel.
 5. **Match the regions.** Vercel Functions default to `iad1` (US East), while a Turso
-   database lives in one AWS region — every request/query would then cross the world. The
+   database lives in one AWS region - every request/query would then cross the world. The
    committed `vercel.json` sets the function region to `bom1` (Mumbai); keep it equal to the
    Turso database's region (`bom1` ↔ `aws-ap-south-1`, `sin1` ↔ `aws-ap-southeast-1`).
 6. Redeploy.
@@ -429,8 +429,8 @@ regenerate the SQLite migrations against Postgres, and switch to `@prisma/adapte
 6. **Admins** manage users at **Users**, roles and field rules at **Admin → Roles &
    Permissions**, and review activity at **Admin → Audit Log**.
 
-Use the **Calendar** (`/calendar`) for a cross-project month/week view — **Calendar
-Settings** manages holiday date ranges and working-day exceptions — and the **☀ / 🌙**
+Use the **Calendar** (`/calendar`) for a cross-project month/week view - **Calendar
+Settings** manages holiday date ranges and working-day exceptions - and the **☀ / 🌙**
 toggle for theming.
 
 ### Roles at a glance
@@ -492,7 +492,7 @@ npm test
 
 The suite runs **197 tests across 15 files** with Vitest. A `pretest` step
 (`scripts/pretest.mjs`) builds scratch databases under `tests/` from the committed
-migration SQL — the dev database is never touched.
+migration SQL - the dev database is never touched.
 
 Coverage includes the domain rules (Fibonacci story points, Est. Days math, transitions,
 working-day capacity with holidays and exceptions), permissions and field rules,
@@ -526,22 +526,22 @@ dashboard aggregation, PDF generation, user management and Bangla-safe search.
 
 ## Troubleshooting
 
-- **`npm run seed` skips on a used database** — that is by design ("Seed skipped: users
+- **`npm run seed` skips on a used database** - that is by design ("Seed skipped: users
   already exist. Use --reset to reseed."). Run `npm run seed -- --reset` to wipe and
   reseed, or create users inside the app instead.
-- **Prisma client out of sync after pulling schema changes** — `npm install` runs
+- **Prisma client out of sync after pulling schema changes** - `npm install` runs
   `prisma generate` for you; if you skipped it, run `npx prisma generate` and restart the
   dev server.
-- **Port 3000 is already taken** — serve elsewhere, e.g. `PORT=4000 npm run dev`
+- **Port 3000 is already taken** - serve elsewhere, e.g. `PORT=4000 npm run dev`
   (PowerShell: `$env:PORT=4000; npm run dev`).
-- **Tests fail against a stale scratch database** — `pretest` only applies migrations to
+- **Tests fail against a stale scratch database** - `pretest` only applies migrations to
   missing or empty `tests/test-*.db` files; delete the stale file(s) and rerun `npm test`
   to rebuild them from the committed migrations.
-- **Sign-in fails with a 500 after deploying to Vercel** — Vercel cannot host a SQLite
+- **Sign-in fails with a 500 after deploying to Vercel** - Vercel cannot host a SQLite
   *file* (read-only filesystem). Set `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN`, apply the
-  migrations with `npm run turso:migrate`, and seed the database — see
+  migrations with `npm run turso:migrate`, and seed the database - see
   [Vercel (SQLite via Turso)](#vercel-sqlite-via-turso).
-- **Sign-in fails on a fresh clone** — make sure `.env` exists and
+- **Sign-in fails on a fresh clone** - make sure `.env` exists and
   `npx prisma migrate dev` has been run from the repository root.
 
 ---
@@ -556,7 +556,7 @@ dashboard aggregation, PDF generation, user management and Bangla-safe search.
 - Login is rate-limited and locks out after repeated failures; administrators can unlock
   accounts and trigger password resets.
 - Password reset links are operator-delivered: with `SMTP_URL` set, a one-hour token is
-  written to the server log to hand over — no mailer is bundled, and without it resets
+  written to the server log to hand over - no mailer is bundled, and without it resets
   stay admin-triggered.
 
 ---
