@@ -7,7 +7,7 @@ automation rules, notifications, audit logging, and Excel/PDF export.
 
 Single-tenant: one deployment = one organisation. Not multi-tenant SaaS.
 
-- **Repo root:** `D:\GitHub\Task-Tracker`
+- **Repo root:** `...:\GitHub\Task-Tracker`
 - **Live URL:** `https://its-task-tracker.vercel.app` — verified healthy on 2026-10-24:
   function region `bom1` (Mumbai), Turso reachable, `/api/auth/me` TTFB ~185 ms.
   The live build is still the **2026-10-25** deployment; the current tree contains newer
