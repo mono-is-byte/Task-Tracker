@@ -1,11 +1,3 @@
-# TaskTracker — Project Handoff
-
-> Purpose of this file: give another engineer or AI agent (e.g. Claude) everything
-> needed to understand, run, change and deploy this project without re-discovering it.
-> Last updated: 2026-10-31.
-
----
-
 ## 1. What this is
 
 **TaskTracker** is a self-hosted, Jira-like project & task management web app for a
@@ -20,8 +12,6 @@ Single-tenant: one deployment = one organisation. Not multi-tenant SaaS.
   function region `bom1` (Mumbai), Turso reachable, `/api/auth/me` TTFB ~185 ms.
   The live build is still the **2026-10-25** deployment; the current tree contains newer
   UI/security work that has not been pushed yet.
-  The previous alias `task-tracker-bay-nine.vercel.app` now returns `DEPLOYMENT_NOT_FOUND`.
-- **Owner's language:** Bangla/Banglish. Technical terms stay in English.
 
 ---
 
