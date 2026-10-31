@@ -48,5 +48,12 @@
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.4"
+  },
+  "allowScripts": {
+    "better-sqlite3": true,
+    "@prisma/engines": true,
+    "core-js": true,
+    "esbuild": true,
+    "prisma": true
   }
 }

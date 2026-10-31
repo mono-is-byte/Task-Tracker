@@ -580,6 +580,10 @@ dashboard aggregation, PDF generation, user management and Bangla-safe search.
   schema than Turso has. Run `npm run turso:backup`, then `npm run turso:migrate`; check
   `_applied_migrations` and `PRAGMA table_info("Comment")`. Restore from the snapshot only
   if a migration fails (the backup is a plain SQLite file under `backup/`).
+- **Vercel shows npm `install-scripts` warnings** - these are npm 11 advisories, not build
+  errors: the scripts still run. `package.json` → `allowScripts` records the reviewed
+  native/install packages (`better-sqlite3`, `@prisma/engines`, `esbuild`, `prisma`,
+  `core-js`), so the list should be empty.
 - **Sign-in fails on a fresh clone** - make sure `.env` exists and
   `npx prisma migrate dev` has been run from the repository root.
 

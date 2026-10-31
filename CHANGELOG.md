@@ -150,6 +150,10 @@ Release sections will be added here as versions are tagged.
 
 ### Fixed
 
+- **npm 11 `install-scripts` advisory**: `package.json` now records `allowScripts` for the
+  reviewed native/install dependencies (`better-sqlite3`, `@prisma/engines`, `esbuild`,
+  `prisma`, `core-js`), so Vercel builds no longer list them as unreviewed. The field is
+  advisory in npm 11; the scripts still run.
 - **Workflow API**: `GET /api/projects/[id]/workflow` no longer 500s (it selected the
   retired `StatusDesignationTag.text`; it now returns `designationRoleIds`), and PATCH no
   longer ignores role suggestions (`designationTags` → `designationRoleIds`). POST returns
