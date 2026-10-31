@@ -4,6 +4,7 @@ import { audit, sha256 } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { randomBytes } from "crypto";
 import { hashPassword, passwordProblems } from "@/lib/password";
+import { rateLimit } from "@/lib/rateLimit";
 
 const ForgotBody = z.object({ identifier: z.string().min(1).max(200) });
 
@@ -15,6 +16,12 @@ export async function POST(req: Request) {
   const parsed = ForgotBody.safeParse(value);
   if (!parsed.success) return fail(400, "validation", "Identifier required.");
   const identifier = parsed.data.identifier.trim().toLowerCase();
+  // Abuse guard: 5 requests per identifier and 20 per IP per 15 minutes.
+  // When limited we return the same generic response, so the limiter cannot be
+  // used to discover whether an account exists.
+  const idAllowed = rateLimit(`forgot:id:${identifier}`, 5, 15 * 60 * 1000).ok;
+  const ipAllowed = rateLimit(`forgot:ip:${clientIp(req)}`, 20, 15 * 60 * 1000).ok;
+  if (!idAllowed || !ipAllowed) return ok({ sent: true });
   const user = await db.user.findFirst({
     where: { OR: [{ email: identifier }, { username: identifier }] },
   });
@@ -26,9 +33,14 @@ export async function POST(req: Request) {
       data: { tokenHash: sha256(token), userId: user.id, expiresAt: new Date(Date.now() + 60 * 60 * 1000) },
     });
     await audit(db, { actorId: user.id, action: "auth.reset_requested", entity: "user", entityId: user.id, ip: clientIp(req) });
-    // Mail sending is configured by the operator (SMTP_URL); the token is logged server-side
-    // so a self-hosted admin can deliver it manually if needed.
-    console.log(`[auth] password reset for ${user.email}: token=${token}`);
+    // Never log the raw token by default: server logs are readable by hosting
+    // operators, and a leaked token is a working password reset. Self-hosted
+    // installs that deliver links manually can opt in explicitly.
+    if (process.env.AUTH_LOG_RESET_TOKEN === "1") {
+      console.log(`[auth] password reset for ${user.email}: token=${token}`);
+    } else {
+      console.log(`[auth] password reset requested for ${user.email} (token not logged)`);
+    }
     return ok({ sent: true });
   }
   await audit(db, { actorId: user.id, action: "auth.reset_requested_no_mail", entity: "user", entityId: user.id, ip: clientIp(req) });

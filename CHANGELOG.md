@@ -11,6 +11,19 @@ Release sections will be added here as versions are tagged.
 
 ### Added
 
+- **Table Description column**: the board description now appears in the Table as a
+  **Description** column beside the task title and is always visible (it is excluded from
+  the Hide-column picker; stale saved layouts that hid it are cleaned on load).
+- **Workflow presets**: Settings → Workflow adds statuses from preset chips only (no manual
+  name/category/colour form) and transition flows from preset chips, each with
+  `+ Add all missing`; presets remain selectable at any time.
+- **Notes Solve**: comments, remarks and feedback gain a **Solve** action that shows a
+  display-only `(solved)` marker beside the note; editing the note clears `solvedAt` and
+  brings the button back. Persisted as nullable `Comment.solvedAt` (migration
+  `20261025130000_comment_solved`).
+- **`npm run turso:backup`**: read-only full snapshot of the remote Turso database into a
+  verified local SQLite file under `backup/` (row counts + foreign-key check; records
+  `_applied_migrations`).
 - **Role = Designation with one source of truth**: a user's designation is a Role id
   kept in sync by a single helper (`src/lib/designation.ts`); every screen renders the
   role's live name and shows "No role" when unset. A one-time repair pass
@@ -54,7 +67,8 @@ Release sections will be added here as versions are tagged.
   **QA Queue - In Testing per Tester** section, estimate vs actual and overdue -
   exportable to PDF.
 - **Per-project workflow** editing (statuses, transitions with allowed roles) with
-  forward-only enforcement, a manager bypass and status-only moves for QA.
+  explicit transitions as the single source of truth, a manager bypass and status-only
+  moves for QA.
 - **Multi-role membership** with union permissions, a role × action matrix and
   field-level rules (`hidden` / `readonly` / `editable`), enforced server-side on every
   endpoint.
@@ -72,8 +86,8 @@ Release sections will be added here as versions are tagged.
 - **Administration**: users directory with avatars and soft deletes, designations that
   reference roles, and an audit log for logins, lockouts, permission changes and resets.
 - **Import / export**: Excel (.xlsx) export of the filtered table view plus CSV/Excel
-  import using the exact spreadsheet column names, per-row reporting of unknown values,
-  automatic user-story creation and `PREFIX-N` dependency keys.
+  import using the exact spreadsheet column names, per-row reporting of unknown values
+  and `PREFIX-N` dependency keys.
 - **Theming and shell**: light/dark theme persisted per device and profile without a
   first-paint flash, a collapsible sidebar (desktop icon rail, mobile overlay drawer) and
   a shared icon set.
@@ -90,6 +104,18 @@ Release sections will be added here as versions are tagged.
 
 ### Changed
 
+- **Table Epic removal**: the `All epics` filter and the Epic column are gone from the
+  Table; `Group: Epic` and the Excel export keep their Epic field. Old saved layouts that
+  hid `epic` are sanitised on load.
+- **Members page**: Designation and project roles are merged into one **Role / Designation**
+  column (project roles first, designation fallback, case/space-insensitive de-duplication).
+- **Project header**: the badge beside the project name now shows the viewer's project
+  role(s) or designation (falling back to the global role only when neither exists) instead
+  of `Super Admin` / `Team member`.
+- **Task drawer header**: epic badge, issue type and editable title, with the task menu and
+  **Close (Esc)**; the project name is no longer shown. **Assigned by** moved into
+  Properties, and assigning/reassigning/claiming requires the `assign` permission
+  (server-enforced).
 - **Table and board time columns** now show **Development time** (tracked in the
   “In Progress” stage), **Testing time** (tracked in “In Testing”) and their **Total time**;
   board cards show only the times relevant to their column - Development in In Progress /
@@ -124,6 +150,13 @@ Release sections will be added here as versions are tagged.
 
 ### Fixed
 
+- **Workflow API**: `GET /api/projects/[id]/workflow` no longer 500s (it selected the
+  retired `StatusDesignationTag.text`; it now returns `designationRoleIds`), and PATCH no
+  longer ignores role suggestions (`designationTags` → `designationRoleIds`). POST returns
+  real duplicate / same-status / cross-project errors.
+- **Stale table layouts** that hid the retired `epic` column (or the always-visible
+  `description`) are cleaned on load, so the Hide/Show-column pickers never show blank
+  options.
 - **Fresh-database seeding** no longer crashes: writes to columns that no longer exist
   were removed, and seeded designations now reference role ids.
 - Quick-created and edited tasks render fully - create/update responses return the
@@ -133,14 +166,36 @@ Release sections will be added here as versions are tagged.
 - Deleting a project option (priority / issue type) that tasks still use asks for a
   replacement and moves those tasks in the same server-side request.
 
+### Security
+
+- **Reset-token logging is opt-in**: the forgot-password route logs only that a reset was
+  requested; `AUTH_LOG_RESET_TOKEN=1` enables raw-token logging for local debugging only.
+- **Forgot-password rate limit**: 5 requests per identifier and 20 per IP per 15 minutes
+  (`src/lib/rateLimit.ts`, in-process; per-instance on serverless), with the same generic
+  response so the limiter cannot be used to enumerate accounts.
+- **Exposure audit (2026-10-31)**: 210 tracked files contain no real `.env` values and no
+  `.env` / `dev.db` / `backup/` / `public/uploads/` files; the GitHub history (one branch,
+  no tags) never contained them. The repository is public (source only). Live `/.env`,
+  `/dev.db`, `/.git/config` → 404; unauthenticated `/api/auth/me` and `/api/users` → 401.
+- **Production Turso verified fully migrated** (23/23, `Comment.solvedAt` present), so the
+  current tree is schema-safe to deploy. `npm run turso:backup` takes a verified read-only
+  snapshot first.
+- **Backup files are sensitive**: `backup/turso-*.db` holds emails, bcrypt password hashes
+  and avatars. It is git-ignored and local-only; never commit, upload or share it.
+
 ### Removed
 
+- **Story feature and Story Points** (2026-10-25): the `Story` model, `Task.storyId`,
+  `Epic.stories`, the Story API/UI/import/export and `Task.storyPoints` /
+  `Project.pointScale` (migrations `20261025120000_remove_story`,
+  `20261025121000_remove_story_points`). "Story" remains available as an **issue type**;
+  retained story data lives in `backup/stories-export.json`.
 - **Dead code and one-off scripts**: removed unused components/helpers/re-exports
   (`IconSearch`, `todayISO`, `setUserDesignation`, `holidayOverlapsRange`,
   `onSidebarChange`, `getTask`, `useTaskMutations`, `useTaskStoreLifecycle`, plus
   unreferenced types/constants and stale auth/server re-exports) and the undocumented
   `check-contrast.mjs` / `merge-local-to-turso.mjs` scripts. Documented CLI scripts are
-  unchanged; type-check, the 252-test suite and the production build stay green.
+  unchanged; type-check, the 256-test suite and the production build stay green.
 - **Sprints** completely: the `Sprint` table plus `Story.sprintId` and `Task.sprintId`
   (migration `20261024182738_drop_legacy_sprint_model`), the unused
   `getAllowedTransitions()` helper, and the never-read `SESSION_SECRET` env var (removed

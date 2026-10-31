@@ -12,7 +12,7 @@ per-project roles, field-level permissions, custom workflows and automation.
 [![Prisma](https://img.shields.io/badge/Prisma-7-2D3748?logo=prisma&logoColor=white)](https://www.prisma.io/)
 [![SQLite](https://img.shields.io/badge/SQLite-better--sqlite3-003B57?logo=sqlite&logoColor=white)](https://github.com/WiseLibs/better-sqlite3)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
-[![Tests](https://img.shields.io/badge/tests-197_passing-2ea44f?logo=vitest&logoColor=white)](./tests)
+[![Tests](https://img.shields.io/badge/tests-256_passing-2ea44f?logo=vitest&logoColor=white)](./tests)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520.9-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
@@ -61,8 +61,13 @@ cloud account. The Prisma schema uses only portable types, so a PostgreSQL move 
 mainly a datasource-provider change - note the committed migrations are SQLite SQL and
 would be regenerated for the new database.
 
-> **Status:** actively developed - 197 automated tests, full server-side permission
+> **Status:** actively developed - 256 automated tests, full server-side permission
 > enforcement, and light/dark theming.
+
+> **Security status (2026-10-31):** production Turso is fully migrated (23/23), a verified
+> read-only backup was taken before the audit, reset-token logging is opt-in, and an
+> exposure audit found no tracked secrets and no exposed env/database/git paths. See
+> [Security Notes](#security-notes).
 
 ---
 
@@ -70,19 +75,26 @@ would be regenerated for the new database.
 
 ### 🗂️ Tasks & work management
 - **Board (Kanban)** with drag-and-drop status changes and per-column quick-add.
-- **Table view** with inline editing, resizable columns, filters and a task drawer; row
-  deletion goes through a confirmation dialog, and the hidden-column + width layout is
-  remembered on the device per project (survives reloads).
+- **Table view** with inline editing, resizable columns, filters and a task drawer; the
+  **Description** column sits beside the task title and is always visible (it is not in the
+  Hide-column picker), row deletion goes through a confirmation dialog, and the hidden-column
+  + width layout is remembered on the device per project (survives reloads). The **Epic
+  filter and Epic column were removed** from the table; `Group: Epic` and the Excel export
+  keep their Epic field.
 - **One task store per project** - the Board, Table, Timeline and drawer read and write the
   same rows (optimistic updates, rollback on failure, SSE refresh), so a change in one view
   appears in the others immediately and no duplicate tasks are created.
 - **Task drawer** for comments, activity history, links (`blocks` / `relates`), labels,
-  custom fields and Git branch.
+  custom fields and Git branch. The header shows the task key, epic badge, issue type and an
+  editable title (never the project name), with the task menu and **Close (Esc)** beside it.
+  **Assigned by** lives in Properties; assigning, reassigning or claiming requires the
+  `assign` permission, enforced server-side. Comments, remarks and feedback have a **Solve**
+  action that shows a display-only `(solved)` marker; editing the note clears it.
 - **Development / Testing / Total time** from the stage timer: `TRACK` statuses offer
   Start/Stop, a running segment auto-stops when the task moves on, and the time tracked in
   “In Progress” (development) and “In Testing” (testing) rolls up into live
   Development / Testing / Total columns on the table and board.
-- **Epics, stories** and structured task types (Task / Story / Bug / Epic / Sub-task).
+- **Epics** and structured task types (Task / Story / Bug / Epic / Sub-task).
 - **Priorities & issue types** are managed per project in Settings - create, edit
   (name / level / colour) and delete with duplicate checks; deleting an option that tasks
   still use asks for a replacement and moves those tasks over, so nothing is left pointing
@@ -117,10 +129,17 @@ would be regenerated for the new database.
 
 ### 🔐 Workflow, roles & permissions
 - Custom **statuses**, **transitions** and **workflow** per project, editable in Settings:
-  the Transitions card is a compact From / To / Allowed-roles table with add and remove
+  statuses are added from preset chips (no manual name/category/colour form) and transition
+  presets add common flows immediately, each with `+ Add all missing` for the rest; the
+  Transitions card is a compact From / To / Allowed-roles table with add and remove
   actions, inline role editing and duplicate/same-status guards (empty roles = every role;
   Admin/PM may always move to any status).
-- **Forward-only** status moves with a manager bypass, enforced on the server.
+- **Explicit transitions are the single source of truth** - a move is allowed only when a
+  transition row exists; the old forward-only rule is gone, and bypass is the explicit
+  `bypass_transitions` permission, enforced on the server.
+- The **project header** shows the viewer's project role(s) or designation beside the
+  project name (falling back to the global role only when neither exists), instead of a
+  generic `Super Admin` / `Team member` badge.
 - **Multi-role membership** - a user can hold several roles in one project; effective
   permissions are the union of them.
 - **Role × action matrix** and **field-level rules** (`hidden` / `readonly` / `editable`)
@@ -133,7 +152,8 @@ would be regenerated for the new database.
   that stacks cleanly on narrow screens.
 
 ### 💬 Collaboration & notifications
-- Threaded **comments**, **remarks** and **feedback** per task.
+- Threaded **comments**, **remarks** and **feedback** per task, with a **Solve** action that
+  marks a note `(solved)`; editing the note clears the marker and brings the button back.
 - **Notifications** bell with a live unread counter, task deep links and a Mark-all-read action.
 - **Realtime updates** over SSE (`/api/projects/:id/events`) with a 15-second polling
   fallback.
@@ -149,8 +169,8 @@ would be regenerated for the new database.
   and are labelled *inactive*).
 - **Audit log** for logins, failed logins, lockouts, permission changes and resets.
 - **Project Members** is one compact card: a one-line add form (user + role), a table with
-  avatar, name/designation, role chips and joined date, and removal behind a confirmation
-  dialog.
+  avatar, a single merged **Role / Designation** column (project roles first, designation
+  fallback, duplicates removed) and joined date, and removal behind a confirmation dialog.
 - **Cookie-session auth** with login rate limiting and lockout, absolute/idle expiry,
   remember-me, forced password change on first login, and a self-service **Active
   Sessions** list on the Profile page: the real browser/OS is parsed from the user agent
@@ -167,8 +187,9 @@ would be regenerated for the new database.
   change is audited. Sign-in with the new address works immediately - this deployment has no
   mail provider, so there is no confirmation link step.
 - **Password resets** are admin-triggered by default; with `SMTP_URL` set, a one-hour reset
-  token is issued and written to the server log for the operator to deliver (no mailer is
-  bundled).
+  token is issued for the operator to deliver (no mailer is bundled). The raw token is
+  **not logged by default** - set `AUTH_LOG_RESET_TOKEN=1` only for local debugging; the
+  forgot-password endpoint is rate-limited (5 per identifier and 20 per IP per 15 minutes).
 - **Security headers** (`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`,
   `Permissions-Policy`) set in `next.config.ts`.
 - No public sign-up - accounts are created by administrators by design.
@@ -199,7 +220,7 @@ would be regenerated for the new database.
 | Validation | **Zod 4** | Request/query validation |
 | Spreadsheets | **xlsx** | Excel / CSV import and export |
 | PDF | **jspdf** | Report and calendar exports |
-| Testing | **Vitest 5** | 197 tests across 15 files |
+| Testing | **Vitest 5** | 256 tests across 19 files |
 | Tooling | **tsx**, **PostCSS** | Seed runner and CSS pipeline |
 
 ---
@@ -312,7 +333,7 @@ Open **http://localhost:3000** and sign in with one of the seeded accounts
 ### Demo data & first login
 
 The seed in `prisma/seed.ts` creates a small demo team, three demo projects
-(**MAP**, **LVM**, **NM**) with epics, stories and tasks, plus default roles, statuses and
+(**MAP**, **LVM**, **NM**) with epics and tasks, plus default roles, statuses and
 automation rules.
 
 Every seeded account is assigned a **shared, well-known demo password defined in
@@ -333,8 +354,9 @@ accounts for local development only:
 | `TURSO_DATABASE_URL` | - | Remote libSQL/Turso URL (`libsql://…`). When set, the running app uses it instead of the local file - required on serverless hosts such as Vercel. |
 | `TURSO_AUTH_TOKEN` | - | Turso database token (`turso db tokens create <db>`); required whenever `TURSO_DATABASE_URL` is remote. |
 | `APP_URL` | - | Base URL of the app; cookies are marked `Secure` when it starts with `https://` (and always in production) |
-| `SMTP_URL` | - | If set, forgot-password issues a one-hour reset token and writes it to the server log for an operator to deliver; if unset, users are told to ask an admin |
-| `SMTP_FROM` | - | From address intended for mail delivery - not read by the current build, which logs reset tokens instead of sending mail |
+| `SMTP_URL` | - | If set, forgot-password creates a one-hour reset token for an operator to deliver (no mail is sent); if unset, users are told to ask an admin |
+| `SMTP_FROM` | - | From address intended for mail delivery - not read by the current build (no mailer is bundled) |
+| `AUTH_LOG_RESET_TOKEN` | - | **Local debugging only.** Set to `1` to log the raw one-hour reset token to the server console; never enable in production (a leaked token is a working password reset) |
 
 Copy `.env.example` to `.env` and fill in your own values - the template contains
 placeholders only.
@@ -367,11 +389,18 @@ same migrations, same tests:
    turso db show tasktracker --url          # libsql://<db>-<org>.turso.io
    turso db tokens create tasktracker       # token
    ```
-2. Apply the committed migrations to it (from your machine, once per schema change):
+2. Take a read-only backup, then apply the committed migrations (from your machine, once
+   per schema change):
    ```bash
+   TURSO_DATABASE_URL="libsql://<db>-<org>.turso.io" \
+   TURSO_AUTH_TOKEN="<token>" npm run turso:backup
    TURSO_DATABASE_URL="libsql://<db>-<org>.turso.io" \
    TURSO_AUTH_TOKEN="<token>" npm run turso:migrate
    ```
+   `turso:backup` only reads the remote database and writes a verified SQLite snapshot under
+   `backup/` (git-ignored); it records the `_applied_migrations` state too. `turso:migrate`
+   is idempotent and skips anything already in `_applied_migrations`. As of **2026-10-31**
+   the production database is fully migrated (23/23, including `Comment.solvedAt`).
 3. Create the first admin user by seeding against Turso:
    ```bash
    TURSO_DATABASE_URL="libsql://<db>-<org>.turso.io" \
@@ -395,6 +424,11 @@ same migrations, same tests:
 
 `src/lib/db.ts` picks the libSQL driver when `TURSO_DATABASE_URL` is set and
 `better-sqlite3` otherwise, so no code change is needed per environment.
+
+> **Local dev vs production credentials:** `.env.development.local` sets empty `TURSO_*`
+> values so `next dev` keeps using `dev.db`; `.env` keeps the real Turso credentials used by
+> `npm run turso:migrate` / `turso:backup`. Next.js loads `.env.development.local` only in
+> development, so the plain-Node migration scripts (`dotenv`) read `.env`.
 
 Known serverless limitations:
 
@@ -476,11 +510,11 @@ editable in the permission matrix.
 From the Table view:
 
 - **⬇ Download Excel (.xlsx)** exports the current (filtered) table view with the
-  exact spreadsheet column names (`SL, Epic, User Story, Task title, Story Points, Est. Hours, Est. Days, …`).
+  exact spreadsheet column names (`SL, Epic, Task title, Est. Hours, Est. Days, Description, Comments & notes, …`).
 - **⬆ Import** accepts your current sheet: `SL` and `Est. Days` are ignored (the serial is
   automatic and the day count is calculated), unknown Epic / Status / Priority / member
-  names are reported per row instead of being guessed, missing user stories are created,
-  and `Dependency` accepts `PREFIX-N` keys.
+  names are reported per row instead of being guessed, and `Dependency` accepts `PREFIX-N`
+  keys.
 
 ---
 
@@ -490,13 +524,13 @@ From the Table view:
 npm test
 ```
 
-The suite runs **197 tests across 15 files** with Vitest. A `pretest` step
+The suite runs **256 tests across 19 files** with Vitest. A `pretest` step
 (`scripts/pretest.mjs`) builds scratch databases under `tests/` from the committed
 migration SQL - the dev database is never touched.
 
-Coverage includes the domain rules (Fibonacci story points, Est. Days math, transitions,
-working-day capacity with holidays and exceptions), permissions and field rules,
-authentication (login/logout, lockout, session expiry, self-service email change with
+Coverage includes the domain rules (Est. Days math, transitions, working-day capacity with
+holidays and exceptions), permissions and field rules, authentication (login/logout,
+lockout, forgot-password rate limiting, session expiry, self-service email change with
 re-authentication and duplicate/username collisions), session display helpers (device
 parsing, status, relative times), project lookup CRUD (duplicate rejection, deleting an
 in-use option with task reassignment), timer derivation, calendar and holiday logic (date
@@ -518,6 +552,7 @@ dashboard aggregation, PDF generation, user management and Bangla-safe search.
 | `npm run admin:create` | Create/repair the fixed super-admin account (local or Turso, per env) |
 | `npm run db-push` | `prisma db push` for quick schema sync |
 | `npm run turso:migrate` | Apply the committed migrations to the remote Turso database |
+| `npm run turso:backup` | Take a verified, read-only snapshot of the remote Turso database into `backup/` |
 | `npm run turso:copy-local` | Copy the local database (`dev.db`) into the remote Turso database, replacing its data |
 | `scripts/_apply-migration.mjs` | Apply committed migrations to the dev database |
 | `scripts/crawl-check.mjs` | Log in and crawl every page / API route for errors |
@@ -541,6 +576,10 @@ dashboard aggregation, PDF generation, user management and Bangla-safe search.
   *file* (read-only filesystem). Set `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN`, apply the
   migrations with `npm run turso:migrate`, and seed the database - see
   [Vercel (SQLite via Turso)](#vercel-sqlite-via-turso).
+- **Task queries fail with `no such column` after deploying** - the code expects a newer
+  schema than Turso has. Run `npm run turso:backup`, then `npm run turso:migrate`; check
+  `_applied_migrations` and `PRAGMA table_info("Comment")`. Restore from the snapshot only
+  if a migration fails (the backup is a plain SQLite file under `backup/`).
 - **Sign-in fails on a fresh clone** - make sure `.env` exists and
   `npx prisma migrate dev` has been run from the repository root.
 
@@ -549,15 +588,30 @@ dashboard aggregation, PDF generation, user management and Bangla-safe search.
 ## Security Notes
 
 - **Never commit `.env`** or any real credentials. The repository tracks only
-  `.env.example`, which contains placeholders.
+  `.env.example`, which contains placeholders; `.env`, `dev.db`, `backup/` and
+  `public/uploads/` are git-ignored.
+- **Exposure audit (2026-10-31):** 210 tracked files contain no real secret values and no
+  `.env` / `dev.db` / backup / upload files; the GitHub history has never contained them.
+  The repository is **public** (source only). The live deployment returns 404 for
+  `/.env`, `/dev.db` and `/.git/config`, and 401 for unauthenticated `/api/auth/me` and
+  `/api/users`.
 - Sessions are opaque tokens stored as SHA-256 hashes; no separate signing secret
   is required.
 - Set `APP_URL` to an `https://` URL in production so cookies are marked `Secure`.
 - Login is rate-limited and locks out after repeated failures; administrators can unlock
   accounts and trigger password resets.
 - Password reset links are operator-delivered: with `SMTP_URL` set, a one-hour token is
-  written to the server log to hand over - no mailer is bundled, and without it resets
-  stay admin-triggered.
+  created but **no mail is sent**. The raw token is **not logged by default** - set
+  `AUTH_LOG_RESET_TOKEN=1` (local/self-hosted debugging only) if the operator needs it in
+  the server log, or use an admin-triggered reset. `/api/auth/forgot` is limited to 5
+  requests per identifier and 20 per IP per 15 minutes (in-process; per-instance on
+  serverless).
+- **Backups are sensitive:** `backup/turso-*.db` contains user emails, bcrypt password
+  hashes and avatars. Keep it local/encrypted, never commit or upload it, and delete it when
+  no longer needed.
+- `clientIp()` trusts the first `x-forwarded-for` value. Vercel overwrites it, but a
+  self-hosted reverse proxy must do the same or the login/forgot limits can be bypassed by
+  spoofing the header.
 
 ---
 
@@ -574,8 +628,9 @@ dashboard aggregation, PDF generation, user management and Bangla-safe search.
 
 Known limitations today:
 
-- Mail is **log-only**: with `SMTP_URL` set, reset tokens are written to the server log for
-  an operator to deliver.
+- Mail is **not bundled**: with `SMTP_URL` set a reset token is created but no message is
+  sent; delivery is manual, and raw-token logging is opt-in (`AUTH_LOG_RESET_TOKEN=1`) and
+  intended for local debugging only.
 - Realtime is **in-process**, fine for a single-instance self-hosted deployment.
 - XLSX import is capped at 2000 rows per run.
 - `middleware.ts` is intentionally not used (deprecated in Next.js 16 in favour of

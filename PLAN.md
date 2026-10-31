@@ -1,5 +1,9 @@
 # TaskTracker — PLAN
 
+> Running record. Sections 0–6 describe the original design and are kept for history;
+> later phases supersede parts of them (sprints, stories and Story Points were removed,
+> workflow now uses explicit transitions). For the current state see **Phase 16**.
+
 ## 0. Environment findings
 - Workspace was empty. Asked one question; stack chosen: **Next.js + Postgres + Prisma**.
 - Runtime: Node v24.18.0, npm 11.16.0, Windows (win32). Network OK.
@@ -28,44 +32,48 @@
 - `PasswordReset` (tokenHash, userId, expiresAt, usedAt)
 - `AuditLog` (actorId, action, entity, entityId, meta JSON, ip, createdAt)
 - `Role` (global definitions; permissions JSON role×action; fieldRules JSON; isSystem)
-- `Project` (key PREFIX, name, hoursPerDay=8, workingDays=[1..5], pointScale, bannerNote, settings)
-- `ProjectMember` (projectId, userId, roleId; unique pair)
+- `Project` (key PREFIX, name, hoursPerDay=8, workingDays=[1..5], bannerNote, settings, isHidden, isCompleted)
+- `ProjectMember` + `ProjectMemberRole` (a member can hold several roles; unique member×role)
 - `Status` (projectId, name, category todo|inprogress|done, color, position)
 - `StatusTransition` (projectId, fromId, toId, roleIds[] JSON, issueTypeIds[] JSON)
 - `Priority` (projectId, name, level, color) — Highest/High/Medium/Low/Lowest
 - `IssueType` (projectId, name, color, icon) — Task/Story/Bug/Epic/Sub-task
-- `Epic`, `Sprint` (key PREFIX-NNN unique per project, goal, planned|active|completed, dates, capacityHours),
-  `Story` (epic?, sprint?, Bangla title/desc)
-- `Task` (projectId+serial unique → display key `PREFIX-serial`; type?, story?, epic?, sprint?, title,
-  description, storyPoints?, estHours?, rdTime (unestimated/R&D hours), loggedHours, priority, status,
-  assignee?, testedBy?, startDate?, endDate?, gitBranch?, labels[], customValues{}, position)
+- `Epic` (name, description, colour, status, position; no Sprint/Story tables since 2026-10-25)
+- `Task` (projectId+serial unique → display key `PREFIX-serial`; type?, epic?, title,
+  description, estHours?, rdTime (unestimated/R&D hours), loggedHours, priority, status,
+  assignee?, assignedBy?/assignedAt?, testedBy?, startDate?, endDate?, dueAt?, timer fields,
+  gitBranch?, labels[], customValues{}, position)
   Archive is DERIVED (status.category=done), not a second table.
-- `TaskLink` (fromId, toId, blocks|relates), `Comment` (kind comment|remark|feedback + author + ts),
+- `TaskLink` (fromId, toId, blocks|relates), `Comment` (kind comment|remark|feedback + author
+  + ts + nullable `solvedAt`),
   `Activity` (who changed what/when), `CustomField` (typed, options, showIn, roleVisibility),
   `AutomationRule` (trigger/condition/action JSON, enabled), `Notification`, `SavedView`, `Holiday`.
 
 ## 3. Permission matrix (default roles; editable by Admin)
 Actions: view_project, create_task, edit_task_all, edit_task_own, delete_task, change_status,
-edit_estimates, change_priority, assign, manage_sprints, manage_epics, manage_fields,
-manage_workflow, manage_automation, view_reports, export, import, manage_members, manage_archive, comment.
+edit_estimates, change_priority, assign, manage_epics, manage_fields, manage_workflow,
+manage_automation, view_reports, export, import, manage_members, manage_archive, comment,
+bypass_transitions.
 - Super Admin (global flag): all actions everywhere.
 - Manager: all project actions except manage_roles global.
-- Developer: view, create, edit own (status ≤ Development Done unless granted), pick unassigned,
-  comment. No edit_estimates of others, no assign others, no sprint plan changes.
-- QA: view, change_status only along DevDone→InTesting→Done/Re-open, edit Feedback/TestedBy fields, comment.
+- Developer: view, create, edit own fields, pick unassigned, comment; status moves follow
+  the project's explicit transitions. No edit_estimates of others, no assign others.
+- QA: view, change_status only along explicit transitions (typically
+  DevDone→InTesting→Done/Re-open), edit Feedback/TestedBy fields, comment.
 - Viewer: view (+optional comments setting).
 Field rules per role: hidden|readonly|editable (e.g. QA edits Feedback/TestedBy only; Dev edits Git Branch/Remarks).
 Status transitions enforced per role × issue type in `StatusTransition`.
 
 ## 4. Domain rules
-- Story Points Fibonacci only (1,2,3,5,8,13,21); hours-only tasks allowed (points optional).
+- Story Points and Sprint planning were removed (2026-10-25); "Story" remains an issue type.
 - `estDays = estHours / hoursPerDay` (project default 8, per-user override for workload) — always computed.
 - Workflow default: To Do → In Progress → Development Done → In Testing → Done; Re-open → In Progress.
-  Statuses editable, each maps to To Do / In Progress / Done category.
+  Statuses editable, each maps to To Do / In Progress / Done category; moves require an explicit
+  `StatusTransition` row (see Phase 16).
 - Automation defaults: →Done sets endDate=today (+archive derived); →In Progress with empty start sets start=today;
   →In Testing notifies TestedBy; Re-open notifies Assignee + clears endDate.
-- Capacity: Σ members workingDays∩sprint-range × hoursPerDay − holidays; warn when planned estHours > capacity.
-- Sprint complete: unfinished tasks carry over to next active/planned sprint (or backlog).
+- Workload capacity uses each member's working days × hoursPerDay, minus holidays/exceptions;
+  warn when planned estHours exceeds it.
 - Bangla: UTF-8 end-to-end, NFC-normalized search, Noto Sans Bengali font.
 
 ## 5. Milestones (commit-style; app runs at every step)
@@ -510,5 +518,75 @@ Report: the deployed site was "very slow" to respond and load. Measured against 
   `npm test` **198/198** (15 files), `npm run build` green.
 - **Not verified:** the post-change latency — that needs the redeploy with `bom1`.
 
+### Phase 16 — Story cleanup, UI/workflow polish, security & migration audit (2026-10-25 → 10-31)
 
+**Story and Story Points removed (2026-10-25).** The `Story` model, `Task.storyId`,
+`Epic.stories`, the Story API/UI/import/export/tests and `Task.storyPoints` /
+`Project.pointScale` / Fibonacci helpers were removed in
+`20261025120000_remove_story` and `20261025121000_remove_story_points`. "Story" survives
+only as an **issue type**. The removed rows were exported first to
+`backup/stories-export.json` (7 stories, 10 linked tasks), so the feature can be restored
+later from a new migration if needed.
+
+**Refactor Phases 0–4 (2026-10-25).**
+- Phase 0 — safety backup under `backup/pre-refactor/` (`backup/` is git-ignored and
+  excluded from `tsconfig.json`).
+- Phase 1 — **Role = Designation** with one sync helper (`src/lib/designation.ts`), live
+  role names everywhere, a one-time `repair:designations` pass, transitions as the single
+  source of truth, the `bypass_transitions` flag (PM-only by default, editable on the Roles
+  page, Super Admin always bypasses), role-id "suggest designations", and server-side
+  field-rule + hidden-field enforcement. Migration
+  `20261024180634_role_designation_and_transition_enforcement`.
+- Phase 2 — `User.gender`; editable username behind password confirmation. Migration
+  `20261024182114_add_user_gender`.
+- Phase 3 — removed the unused `Sprint` model/columns, `getAllowedTransitions()` and
+  `SESSION_SECRET` (evidence in `CLEANUP_REPORT.md`). Migration
+  `20261024182738_drop_legacy_sprint_model`.
+- Phase 4 — **Liquid Glass** visual layer in `globals.css` (tokens + `.glass*` classes),
+  light/dark, with reduced-motion/-transparency and no-`backdrop-filter` fallbacks.
+
+**UI, table and workflow (2026-10-25).**
+- Table: the board **Description** now appears as an always-visible column beside the task
+  title (excluded from the Hide-column picker); the Epic filter and Epic column were
+  removed (`Group: Epic` and the Excel Epic field remain); stale saved layouts are
+  sanitised on load.
+- Task drawer header: epic badge, issue type, editable title, task menu and **Close (Esc)**;
+  the project name is gone. **Assigned by** moved into Properties, and
+  assigning/reassigning/claiming requires the `assign` permission (server-enforced).
+- Notes: comments, remarks and feedback gained a **Solve** action with a display-only
+  `(solved)` marker, backed by nullable `Comment.solvedAt` (migration
+  `20261025130000_comment_solved`); editing the note clears it.
+- Members: one merged **Role / Designation** column (project roles first, designation
+  fallback, de-duplicated). Project header: the viewer's project role(s) or designation
+  instead of a generic `Super Admin` / `Team member` badge.
+- Settings → Workflow: statuses are added from preset chips only (no manual
+  name/category/colour form); transition presets add common flows immediately with
+  `+ Add all missing`. Fixed the GET 500 (`StatusDesignationTag.text` → `designationRoleIds`),
+  the ignored PATCH role suggestions, and real duplicate/same-status/cross-project errors.
+- Workflow denials on the board revert the drag with a toast (API 403); illegal target
+  columns are dimmed.
+
+**Migration, backup & security audit (2026-10-31).**
+- Inspected production Turso read-only: **23/23 migrations applied**, `Comment.solvedAt`
+  present, `Story` table and `Task.storyPoints` gone — the tree is schema-safe to deploy.
+  `npm run turso:migrate` re-ran as a **no-op** ("database is already up to date"); no
+  production write was made.
+- Took a full read-only snapshot before touching anything:
+  `backup/turso-2026-10-31T03-19-25.db` (1.86 MB, 28 tables, row counts verified, 0 FK
+  violations). Added the reusable `npm run turso:backup`
+  (`scripts/backup-turso.mjs`), which records `_applied_migrations` and verifies the
+  snapshot; the file contains PII/hashes and stays local and git-ignored.
+- Reset tokens are **no longer logged by default**; `AUTH_LOG_RESET_TOKEN=1` is the
+  explicit local-debug opt-in (documented in `.env.example`).
+- `/api/auth/forgot` is rate-limited by an in-process fixed-window limiter
+  (`src/lib/rateLimit.ts`): 5 per identifier + 20 per IP per 15 minutes, returning the
+  same generic response so it cannot enumerate accounts.
+- Exposure audit: 210 tracked files, no `.env` / `dev.db` / `backup/` / `uploads/` tracked
+  and no real credentials anywhere in GitHub history (one branch, no tags). The repository
+  is **public (source only)**. Live `/.env`, `/dev.db`, `/.git/config` → 404;
+  unauthenticated `/api/auth/me` and `/api/users` → 401.
+- Verification: `tsc --noEmit` clean, `npm test` **256/256 (19 files)**. `npm run build`
+  is blocked in this environment only by the Google Fonts fetch (network), not by code.
+- **Not done:** commit/push/deploy (no `git`/Vercel CLI here) — the live site still runs
+  the 2026-10-25 build. Slow-load / realtime status-refresh work is paused by the owner.
 

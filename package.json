@@ -15,6 +15,7 @@
     "repair:designations": "tsx scripts/repair-designations.ts",
     "db-push": "prisma db push",
     "turso:migrate": "node scripts/migrate-turso.mjs",
+    "turso:backup": "node scripts/backup-turso.mjs",
     "turso:copy-local": "node scripts/copy-local-to-turso.mjs"
   },
   "keywords": [],

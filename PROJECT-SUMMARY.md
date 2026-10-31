@@ -2,14 +2,14 @@
 
 > Purpose of this file: give another engineer or AI agent (e.g. Claude) everything
 > needed to understand, run, change and deploy this project without re-discovering it.
-> Last updated: 2026-10-25.
+> Last updated: 2026-10-31.
 
 ---
 
 ## 1. What this is
 
 **TaskTracker** is a self-hosted, Jira-like project & task management web app for a
-software team. It covers projects → epics → stories → tasks, a Kanban board, a table
+software team. It covers projects → epics → tasks, a Kanban board, a table
 view, a timeline/calendar, per-stage time tracking, role/permission management,
 automation rules, notifications, audit logging, and Excel/PDF export.
 
@@ -18,6 +18,8 @@ Single-tenant: one deployment = one organisation. Not multi-tenant SaaS.
 - **Repo root:** `D:\GitHub\Task-Tracker`
 - **Live URL:** `https://its-task-tracker.vercel.app` — verified healthy on 2026-10-24:
   function region `bom1` (Mumbai), Turso reachable, `/api/auth/me` TTFB ~185 ms.
+  The live build is still the **2026-10-25** deployment; the current tree contains newer
+  UI/security work that has not been pushed yet.
   The previous alias `task-tracker-bay-nine.vercel.app` now returns `DEPLOYMENT_NOT_FOUND`.
 - **Owner's language:** Bangla/Banglish. Technical terms stay in English.
 
@@ -73,24 +75,24 @@ Task-Tracker/
 │   │   │   │   ├── archive/ members/ settings/
 │   │   │   ├── profile/
 │   │   │   └── users/
-│   │   ├── api/                   # 43 route handlers (see §8)
+│   │   ├── api/                   # 44 route handlers (see §8)
 │   │   ├── change-password/  forgot-password/  login/  no-access/
 │   │   ├── layout.tsx  globals.css
 │   │   └── instrumentation.ts     # server-start timer sweep (unreliable on serverless)
 │   ├── components/                # 21 client components
 │   ├── hooks/                     # useProject.ts (SSE + polling), useTicker.ts
 │   └── lib/                       # 35 server/domain modules (see §5)
-├── tests/                         # 15 Vitest files, 198 tests
+├── tests/                         # 19 Vitest files, 256 tests
 ├── vercel.json                    # { "regions": ["bom1"] }
 ├── next.config.ts                 # serverExternalPackages + security headers
 ├── README.md                      # user-facing docs
-├── PLAN.md                        # architecture + 15 phases of history/decisions
+├── PLAN.md                        # architecture + 16 phases of history/decisions
 └── AGENTS.md                      # Next.js 16 agent rules (auto-generated block)
 ```
 
 ---
 
-## 4. Data model (Prisma, 29 models, SQLite)
+## 4. Data model (Prisma, 27 models, SQLite)
 
 Grouped by concern:
 
@@ -114,15 +116,18 @@ Grouped by concern:
 
 **Work items**
 - `Project` has `key`, `hoursPerDay`, `workingDays`, `hidden`, `completed`, settings.
-- `Epic`, `Story` (the `Sprint` model and the `Story.sprintId` / `Task.sprintId`
-  columns were dropped in migration `20261024182738_drop_legacy_sprint_model`).
-- `Task` — `serial` (unique per project → display key `PROJ-123`), type, story, epic,
-  title, description, `storyPoints`, `estHours`, `rdTime`, `loggedHours`, priority,
-  status, assignee, testedBy, dates (`startDate`, `endDate`, `dueAt`), timer fields
-  (`startedAt`, `stoppedAt`, `stageEnteredAt`, `totalSeconds`), `gitBranch`,
+- `Epic`. The `Story` model, `Task.storyId`, `Epic.stories`, `Task.storyPoints` and
+  `Project.pointScale` were removed on 2026-10-25 (migrations
+  `20261025120000_remove_story`, `20261025121000_remove_story_points`); "Story" remains
+  available as an **issue type**. The `Sprint` model and `Story.sprintId` / `Task.sprintId`
+  columns were dropped earlier (`20261024182738_drop_legacy_sprint_model`).
+- `Task` — `serial` (unique per project → display key `PROJ-123`), type, epic, title,
+  description, `estHours`, `rdTime`, `loggedHours`, priority, status, assignee,
+  `assignedById`, `assignedAt`, testedBy, dates (`startDate`, `endDate`, `dueAt`), timer
+  fields (`startedAt`, `stoppedAt`, `stageEnteredAt`, `totalSeconds`), `gitBranch`,
   `labels` JSON, `customValues` JSON, `position`.
 - `TaskStageTime` — one row per Start→Stop segment (per-stage history).
-- `TaskLink`, `Comment`, `Activity`.
+- `TaskLink`, `Comment` (with nullable `solvedAt` for the Solve marker), `Activity`.
 
 **Configuration**
 - `Status` (+ `StatusTransition`), `Priority`, `IssueType`, `StatusDesignationTag`,
@@ -171,12 +176,18 @@ Grouped by concern:
   referrer-policy, permissions-policy, CSP-ish defaults).
 - Mutating API calls go through a same-origin check in `src/lib/api.ts`.
 - `AuditLog` records auth, admin and destructive actions.
+- Forgot-password: 5 requests per identifier + 20 per IP per 15 minutes (in-process
+  fixed window, `src/lib/rateLimit.ts`) with the same generic response, so it cannot be
+  used to enumerate accounts. The raw reset token is **not logged by default**;
+  `AUTH_LOG_RESET_TOKEN=1` is a local-debug opt-in only.
+- The limiter is per-instance (like SSE) and `clientIp()` trusts the first
+  `x-forwarded-for`; Vercel overwrites that header, but a self-hosted proxy must too.
 
 ---
 
 ## 7. Permissions & workflow
 
-- **21 actions**: `view_project`, `create_task`, `edit_task_all`, `edit_task_own`,
+- **20 actions**: `view_project`, `create_task`, `edit_task_all`, `edit_task_own`,
   `delete_task`, `change_status`, `edit_estimates`, `change_priority`, `assign`,
   `manage_epics`, `manage_fields`, `manage_workflow`, `manage_automation`,
   `view_reports`, `export`, `import`, `manage_members`, `manage_archive`, `comment`,
@@ -193,7 +204,7 @@ Grouped by concern:
   forward-only rule). `StatusDesignationTag` (role ids) gates who may *enter* a status;
   the "Assign step" dialog runs when a transition requires assignment. Bypass is the
   explicit `bypass_transitions` permission (Project Manager only by default); Super
-  Admins always bypass. See `PRAGMA` — migrations are never edited, only appended.
+  Admins always bypass. See §10 for the migration/backup rules.
 
 ---
 
@@ -204,11 +215,11 @@ Grouped by concern:
 `/p/[id]/{board,table,timeline,reports,workload,archive,members,settings}`,
 plus public `/login`, `/forgot-password`, `/change-password`, `/no-access`.
 
-**API (43 route handlers)** grouped:
+**API (44 route handlers)** grouped:
 - Auth: `POST /api/auth/login|logout|forgot|change-password`, `GET /api/auth/me`,
   `GET/DELETE /api/auth/sessions`.
 - Projects: `/api/projects`, `/api/projects/[id]` (+ `settings`, `members`,
-  `workflow`, `fields`, `lookups`, `epics`, `stories`, `automation`, `views`,
+  `workflow`, `fields`, `lookups`, `epics`, `automation`, `views`,
   `activity`, `export`, `import`, `holidays`).
 - Tasks: `/api/projects/[id]/tasks`, `.../tasks/bulk`, `.../tasks/[taskId]`
   (+ `comments`, `links`, `timer`).
@@ -263,9 +274,17 @@ Migrations:
 ```powershell
 $env:TURSO_DATABASE_URL="libsql://..."
 $env:TURSO_AUTH_TOKEN="..."
+npm run turso:backup      # read-only snapshot → backup/turso-<timestamp>.db (verified)
 npm run turso:migrate     # replays prisma/migrations, tracks _applied_migrations, idempotent
 npm run seed -- --reset   # demo data (wipes first)
 ```
+
+As of **2026-10-31** production Turso is **23/23 migrated** (including
+`Comment.solvedAt`); a verification run reported "database is already up to date".
+`turso:backup` copies all 28 tables, verifies row counts and foreign keys, and is
+git-ignored; the file contains personal data and password hashes, so treat it as sensitive.
+`turso:migrate` reads `.env` (plain Node + `dotenv`), while `next dev` reads
+`.env.development.local` first - see §11.
 
 ### Region alignment (performance critical)
 `vercel.json` pins the function region to **`bom1` (Mumbai)** to match the Turso DB in
@@ -290,6 +309,11 @@ Demo login: `admin` (or `admin@demo.local`) / **`Demo1234!`** — all seeded use
 that password and are forced to change it on first login. Other demo users:
 `pm`, `saju`, `shovon`, `sumit`, `apon`, `viewer`.
 
+> **Local vs remote credentials:** `.env.development.local` sets empty `TURSO_*` values so
+> `next dev` stays on `dev.db`; `.env` keeps the real Turso credentials used by
+> `turso:migrate` / `turso:backup` (plain Node scripts read `.env`, not the Next.js
+> development override).
+
 | Script | Purpose |
 |---|---|
 | `npm run dev` | Next dev server |
@@ -298,6 +322,7 @@ that password and are forced to change it on first login. Other demo users:
 | `npm run seed -- --reset` | Wipe + demo data |
 | `npm run admin:create` | Create/repair super-admin |
 | `npm run turso:migrate` | Migrations → Turso |
+| `npm run turso:backup` | Read-only verified snapshot of Turso → `backup/` |
 | `npm run turso:copy-local` | Copy `dev.db` data → Turso |
 | `npm run db-push` | `prisma db push` (quick sync, no migration file) |
 
@@ -305,13 +330,14 @@ that password and are forced to change it on first login. Other demo users:
 
 ## 12. Testing
 
-- Vitest, node environment, **15 files / 198 tests**.
+- Vitest, node environment, **19 files / 256 tests**.
 - `scripts/pretest.mjs` builds throwaway SQLite databases **from the committed
   migrations** (not `db push`), so tests validate the migration chain.
 - Tests use `makeTestClient(url)` from `src/lib/db.ts`.
 - Coverage areas: auth, permissions, projects, tasks, calendar, holidays, lookups,
-  labels, reports, session info, timeline, timer, users, domain, pdf.
-- Current status: `tsc --noEmit` clean, 198/198 pass, `next build` green.
+  labels, reports, session info, timeline, timer, users, domain, pdf, rate limiting.
+- Current status: `tsc --noEmit` clean, 256/256 pass. `next build` is blocked in this
+  environment only by the Google Fonts fetch (network), not by code.
 
 **Rule: never edit an applied migration.** Add a new timestamped migration instead,
 otherwise `turso:migrate` and `pretest.mjs` diverge.
@@ -343,17 +369,43 @@ otherwise `turso:migrate` and `pretest.mjs` diverge.
 9. **Git** — the repository exists (`.git`), but the `git` CLI is **not on PATH** in
    this environment. All current work may be **uncommitted**.
 10. **Bangla UI strings** are user-authored content in seed data/reports; keep them.
+11. **Environment split** — `.env.development.local` (empty `TURSO_*`) keeps local dev on
+    `dev.db`; `.env` holds the real Turso credentials for `turso:migrate` / `turso:backup`.
+    Never commit either file.
+12. **Backups are sensitive** — `backup/turso-*.db` contains emails, bcrypt hashes and
+    avatars; `backup/` is git-ignored. Do not upload/share; delete when done.
+13. **The GitHub repo is public** — source only. The 2026-10-31 audit found no real
+    credential in 210 tracked files or in history, but never force-add `.env`, `dev.db`,
+    backups or uploads.
+14. **Rate limiting is in-process** — `src/lib/rateLimit.ts` is per instance (like SSE); on
+    serverless it is best-effort, not a global quota.
 
 ---
 
-## 14. Current state (2026-10-25)
+## 14. Current state (2026-10-31)
 
+- **Phase 16 (2026-10-25 → 10-31) — drawer/table/members/workflow/solve + security:**
+  - Drawer header: epic badge + issue type + editable title, task menu + **Close (Esc)**;
+    the project name was removed. **Assigned by** moved into Properties and is
+    `assign`-gated (server-enforced).
+  - Notes **Solve**: `Comment.solvedAt`, display-only `(solved)` marker, edit clears it;
+    migration `20261025130000_comment_solved` is applied locally and on Turso.
+  - Workflow Settings: presets-only statuses, transition presets + `+ Add all missing`;
+    GET 500 fixed (`StatusDesignationTag.text` → `roleId`), PATCH `designationRoleIds`
+    fixed, POST returns real errors.
+  - Table: **Description** column always visible beside the title; Epic filter/column
+    removed (`Group: Epic` and the Excel Epic field remain); stale layouts cleaned.
+  - Members: single **Role / Designation** column. Project header: project role/designation.
+  - Security: reset-token logging opt-in (`AUTH_LOG_RESET_TOKEN`), forgot-password rate
+    limit, exposure audit (no secrets in git/GitHub; live 404/401), Turso verified 23/23,
+    `npm run turso:backup` added.
+  - Verification: `tsc --noEmit` clean; **256/256 tests (19 files)**; local dev on `dev.db`.
 - Phase 14: Vercel + Turso serverless support (`db.ts` dual adapter, `migrate-turso.mjs`,
   `prisma.config.ts`, env docs, README/PLAN).
 - Phase 15: latency work — `vercel.json` region `bom1`, React-`cache`d `getViewer`,
   parallel `loadProject` first queries, `s-maxage` on avatars.
 - `UserAvatar` model + migration `20261019120000_user_avatar` + DB-backed avatar route
-  (must be applied to Turso with `npm run turso:migrate`).
+  (applied to Turso; production is 23/23 as of 2026-10-31).
 - **Refactor Phases 0–4 (2026-10-25)**:
   - Phase 0 — safety backup in `backup/pre-refactor/` (`backup/` is git-ignored and
     excluded from `tsconfig.json`).
@@ -369,8 +421,9 @@ otherwise `turso:migrate` and `pretest.mjs` diverge.
   - Phase 4 — **Liquid Glass** visual layer in `globals.css` (tokens + `.glass*`
     classes); light + dark, reduced-motion/-transparency and no-`backdrop-filter`
     fallbacks.
-  - Verification after the refactor: `prisma generate`, `tsc`, **212 tests**, build — all
-    green. The three new migrations still need `npm run turso:migrate` against Turso.
+  - Verification after the refactor: `prisma generate`, `tsc`, **212 tests at the time**
+    (suite is now 256), build — all green. All three migrations are applied to Turso
+    (production 23/23 on 2026-10-31).
 
 Verified live on `https://its-task-tracker.vercel.app` (2026-10-24):
 
@@ -384,9 +437,13 @@ The region fix is confirmed working: dynamic TTFB dropped from ~390 ms (function
 `iad1`) to ~185 ms (function in `bom1`, next to the Turso database).
 
 Open items:
-- Ensure Turso has the newest migration (`user_avatar`) applied.
+- **Push & deploy:** the current tree (drawer/table/members/workflow/Solve + security
+  hardening) is uncommitted/unpushed; the live site still serves the 2026-10-25 build.
+  Deploying is the owner's step (no `git`/Vercel CLI in this environment).
 - Change the demo `admin` password and deactivate demo accounts in production.
 - Optional: disable SSE on serverless (polling-only) to cut function invocations.
+- **Paused by the owner (2026-10-31):** slow data load / realtime status-refresh work.
+  Do not start it without a new request.
 
 ---
 
@@ -404,3 +461,16 @@ Open items:
 6. Respect the naming and structure of `src/lib` domain modules rather than adding
    ad-hoc queries in components.
 7. When touching deployment, keep `vercel.json` region and the Turso region aligned.
+8. **Back up before migrating:** run `npm run turso:backup` before `npm run turso:migrate`
+   or any schema/data change against Turso, and verify the snapshot exists. Never edit an
+   applied migration; add a new one (the chain is append-only and shared with production).
+9. **Never commit sensitive files:** `.env`, `.env.development.local`, `dev.db`,
+   `backup/` and `public/uploads/` stay local and git-ignored. The GitHub repository is
+   public - check `git status` before staging anything.
+10. **Server permissions are the source of truth:** assign/claim, field edits and workflow
+    moves must be enforced in the API, not only hidden in the UI. Use
+    `requireProjectPermission` / `getMembership` and the `ACTIONS` flags.
+11. **Keep SQLite/Turso compatibility:** use portable Prisma types and migrations that run
+    on both `better-sqlite3` and libSQL; no provider-specific SQL or native-only APIs.
+12. **Do not restart paused work** (realtime status refresh / slow-load investigation)
+    without an explicit request from the owner.
