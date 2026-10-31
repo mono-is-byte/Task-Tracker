@@ -175,7 +175,7 @@ Grouped by concern:
 
 ---
 
-## 7. Permissions & workflow
+## 7. Permissions & workflows
 
 - **20 actions**: `view_project`, `create_task`, `edit_task_all`, `edit_task_own`,
   `delete_task`, `change_status`, `edit_estimates`, `change_priority`, `assign`,
