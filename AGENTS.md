@@ -18,10 +18,6 @@ Read [README.md](./README.md), [PROJECT-SUMMARY.md](./PROJECT-SUMMARY.md) and th
   `npm run turso:migrate` or any schema/data change against Turso. Never edit an applied
   migration — the chain is append-only and shared with production. Never write to
   production without explicit approval.
-- **Never commit sensitive files.** `.env`, `.env.development.local`, `dev.db`, `backup/`
-  and `public/uploads/` are git-ignored. The GitHub repository is public; only
-  `.env.example` with placeholders belongs in git. Backups contain PII and password
-  hashes — keep them local/encrypted and never upload or share them.
 - **Keep SQLite/Turso compatibility.** Use portable Prisma types and migrations that run
   on both `better-sqlite3` and libSQL; no provider-specific SQL or native-only APIs.
 - **Server permissions are the source of truth.** Enforce assign/claim, field edits and
