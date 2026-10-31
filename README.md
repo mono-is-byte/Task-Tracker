@@ -302,9 +302,6 @@ Then open `.env` and set at least:
 
 - `DATABASE_URL` - `file:./dev.db` works out of the box.
 
-> 🔒 Never commit `.env`. It is already listed in `.gitignore`; only `.env.example`
-> is tracked. See [Environment Variables](#environment-variables) for the full list.
-
 ### 3. Set up the database
 
 Apply the committed migrations and seed the demo data:
@@ -525,8 +522,7 @@ npm test
 ```
 
 The suite runs **256 tests across 19 files** with Vitest. A `pretest` step
-(`scripts/pretest.mjs`) builds scratch databases under `tests/` from the committed
-migration SQL - the dev database is never touched.
+(`scripts/pretest.mjs`)
 
 Coverage includes the domain rules (Est. Days math, transitions, working-day capacity with
 holidays and exceptions), permissions and field rules, authentication (login/logout,
@@ -591,11 +587,6 @@ dashboard aggregation, PDF generation, user management and Bangla-safe search.
 
 ## Security Notes
 
-- **Never commit `.env`** or any real credentials. The repository tracks only
-  `.env.example`, which contains placeholders; `.env`, `dev.db`, `backup/` and
-  `public/uploads/` are git-ignored.
-- **Exposure audit (2026-10-31):** 210 tracked files contain no real secret values and no
-  `.env` / `dev.db` / backup / upload files; the GitHub history has never contained them.
   The repository is **public** (source only). The live deployment returns 404 for
   `/.env`, `/dev.db` and `/.git/config`, and 401 for unauthenticated `/api/auth/me` and
   `/api/users`.
@@ -610,9 +601,6 @@ dashboard aggregation, PDF generation, user management and Bangla-safe search.
   the server log, or use an admin-triggered reset. `/api/auth/forgot` is limited to 5
   requests per identifier and 20 per IP per 15 minutes (in-process; per-instance on
   serverless).
-- **Backups are sensitive:** `backup/turso-*.db` contains user emails, bcrypt password
-  hashes and avatars. Keep it local/encrypted, never commit or upload it, and delete it when
-  no longer needed.
 - `clientIp()` trusts the first `x-forwarded-for` value. Vercel overwrites it, but a
   self-hosted reverse proxy must do the same or the login/forgot limits can be bypassed by
   spoofing the header.
