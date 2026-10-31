@@ -437,7 +437,7 @@ Open items:
 
 ---
 
-## 15. How to work on this project (for an AI agent)
+## 15. How to work on this project
 
 1. Run `npm test` and `node node_modules/typescript/bin/tsc --noEmit` before and after
    changes; `npm run build` before declaring success.
